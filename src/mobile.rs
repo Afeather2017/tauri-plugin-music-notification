@@ -170,4 +170,13 @@ impl<R: Runtime> MusicNotification<R> {
             .run_mobile_plugin("setServer", SetServerRequest { library_name })
             .map_err(Into::into)
     }
+
+    pub fn set_headset_media_button_disabled(
+        &self,
+        payload: SetHeadsetMediaButtonDisabledRequest,
+    ) -> crate::Result<EmptyResponse> {
+        self.0
+            .run_mobile_plugin("setHeadsetMediaButtonDisabled", payload)
+            .map_err(Into::into)
+    }
 }

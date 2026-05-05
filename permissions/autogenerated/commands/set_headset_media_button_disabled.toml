@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-set-headset-media-button-disabled"
+description = "Enables the set_headset_media_button_disabled command without any pre-configured scope."
+commands.allow = ["set_headset_media_button_disabled"]
+
+[[permission]]
+identifier = "deny-set-headset-media-button-disabled"
+description = "Denies the set_headset_media_button_disabled command without any pre-configured scope."
+commands.deny = ["set_headset_media_button_disabled"]

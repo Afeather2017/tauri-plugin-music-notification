@@ -81,6 +81,11 @@ class SetPlayModeArgs {
   var playMode: String? = null
 }
 
+@InvokeArg
+class SetHeadsetMediaButtonDisabledArgs {
+  var disabled: Boolean = false
+}
+
 @TauriPlugin
 class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) {
 
@@ -586,6 +591,26 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
             invoke.resolve(ret)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register server library: ${e.message}")
+            val ret = JSObject()
+            ret.put("success", false)
+            ret.put("message", e.message)
+            invoke.resolve(ret)
+        }
+    }
+
+    @Command
+    fun setHeadsetMediaButtonDisabled(invoke: Invoke) {
+        try {
+            val args = invoke.parseArgs(SetHeadsetMediaButtonDisabledArgs::class.java)
+            MusicPlayerService.instance?.updateHeadsetMediaButtonSetting(args.disabled)
+
+            Log.d(TAG, "Headset media button disabled set to: ${args.disabled}")
+
+            val ret = JSObject()
+            ret.put("success", true)
+            invoke.resolve(ret)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to set headset media button disabled", e)
             val ret = JSObject()
             ret.put("success", false)
             ret.put("message", e.message)

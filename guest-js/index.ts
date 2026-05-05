@@ -182,3 +182,12 @@ export async function setServer(libraryName: string): Promise<{ success: boolean
     }
   );
 }
+
+export async function setHeadsetMediaButtonDisabled(disabled: boolean): Promise<{ success: boolean; message?: string }> {
+  return await invoke<{ success: boolean; message?: string }>(
+    'plugin:music-notification|set_headset_media_button_disabled',
+    {
+      payload: { disabled },
+    }
+  );
+}

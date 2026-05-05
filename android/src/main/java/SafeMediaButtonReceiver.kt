@@ -27,6 +27,11 @@ class SafeMediaButtonReceiver : BroadcastReceiver() {
         val keyEvent = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return
         if (keyEvent.action != KeyEvent.ACTION_DOWN) return
 
+        if (MusicPlayerService.isHeadsetMediaButtonDisabled(context)) {
+            Log.d(TAG, "onReceive: headset media buttons disabled, ignoring keyCode=${keyEvent.keyCode}")
+            return
+        }
+
         val service = MusicPlayerService.instance
         if (service == null) {
             Log.w(TAG, "onReceive: MusicPlayerService not running, ignoring keyCode=${keyEvent.keyCode}")

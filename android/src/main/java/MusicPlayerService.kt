@@ -39,6 +39,7 @@ class MusicPlayerService : Service() {
         private const val PREFS_NAME = "music_notification"
         private const val PREF_SESSION = "playback_session"
         private const val PREF_NORMALIZATION = "normalization_config"
+        private const val PREF_DISABLE_HEADSET_MEDIA_BUTTON = "disable_headset_media_button"
         private const val LUFS_POLL_DELAY_MS = 1000L
         private const val LUFS_POLL_MAX_ATTEMPTS = 8
 
@@ -155,6 +156,16 @@ class MusicPlayerService : Service() {
             prefs.edit()
                 .putString(PREF_NORMALIZATION, json.toString())
                 .apply()
+        }
+
+        fun isHeadsetMediaButtonDisabled(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(PREF_DISABLE_HEADSET_MEDIA_BUTTON, false)
+        }
+
+        fun setHeadsetMediaButtonDisabled(context: Context, disabled: Boolean) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(PREF_DISABLE_HEADSET_MEDIA_BUTTON, disabled).apply()
         }
 
         private fun parseSessionJson(json: JSONObject): SessionSnapshot {
@@ -342,12 +353,18 @@ class MusicPlayerService : Service() {
         stopMusic(clearQueue = false)
     }
 
+    fun updateHeadsetMediaButtonSetting(disabled: Boolean) {
+        headsetMediaButtonDisabled = disabled
+        setHeadsetMediaButtonDisabled(this, disabled)
+    }
+
     private var currentUrl: String? = null
     private var startCommandCount = 0L
     private var playbackGeneration = 0L
     private var lufsResolutionGeneration = 0L
     private var pauseAfterRunnable: Runnable? = null
     private var normalizationConfig = NormalizationConfig()
+    private var headsetMediaButtonDisabled = false
     private var playTrackStartTime = 0L
     private var prepareStartTime = 0L
     private var playTrackCallStartTime = 0L
@@ -369,6 +386,7 @@ class MusicPlayerService : Service() {
         instance = this
         handler = Handler(Looper.getMainLooper())
         normalizationConfig = loadNormalizationConfig(this)
+        headsetMediaButtonDisabled = isHeadsetMediaButtonDisabled(this)
         mediaSession = MediaSessionCompat(this, "MusicPlayerService")
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -465,6 +483,10 @@ class MusicPlayerService : Service() {
         startCommandCount += 1
 
         if (intent?.action == Intent.ACTION_MEDIA_BUTTON) {
+            if (headsetMediaButtonDisabled) {
+                Log.d(TAG, "onStartCommand: ignoring MEDIA_BUTTON, headset buttons disabled")
+                return START_STICKY
+            }
             MediaButtonReceiver.handleIntent(mediaSession, intent)
         }
 

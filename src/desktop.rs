@@ -152,4 +152,11 @@ impl<R: Runtime> MusicNotification<R> {
             message: Some("Server registration only available on mobile".to_string()),
         })
     }
+
+    pub fn set_headset_media_button_disabled(
+        &self,
+        _payload: SetHeadsetMediaButtonDisabledRequest,
+    ) -> crate::Result<EmptyResponse> {
+        Ok(EmptyResponse { success: true })
+    }
 }

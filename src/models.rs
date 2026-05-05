@@ -165,6 +165,12 @@ pub struct SetServerResponse {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetHeadsetMediaButtonDisabledRequest {
+    pub disabled: bool,
+}
+
 // Server trait for example apps to implement
 use std::sync::{Arc, Mutex};
 

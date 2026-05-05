@@ -58,7 +58,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::stop_service,
             commands::set_volume,
             commands::set_normalization_config,
-            commands::set_server
+            commands::set_server,
+            commands::set_headset_media_button_disabled
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

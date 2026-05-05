@@ -134,3 +134,11 @@ pub(crate) async fn set_server<R: Runtime>(
 ) -> Result<SetServerResponse> {
     app.music_notification().set_server(library_name)
 }
+
+#[command]
+pub(crate) async fn set_headset_media_button_disabled<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SetHeadsetMediaButtonDisabledRequest,
+) -> Result<EmptyResponse> {
+    app.music_notification().set_headset_media_button_disabled(payload)
+}

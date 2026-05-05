@@ -24,6 +24,7 @@ Default permissions for the plugin
 - `allow-get-playback-session`
 - `allow-clear-playing-queue`
 - `allow-set-play-mode`
+- `allow-set-headset-media-button-disabled`
 
 ## Permission Table
 
@@ -342,6 +343,32 @@ Enables the seek_and_play command without any pre-configured scope.
 <td>
 
 Denies the seek_and_play command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`music-notification-api:allow-set-headset-media-button-disabled`
+
+</td>
+<td>
+
+Enables the set_headset_media_button_disabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`music-notification-api:deny-set-headset-media-button-disabled`
+
+</td>
+<td>
+
+Denies the set_headset_media_button_disabled command without any pre-configured scope.
 
 </td>
 </tr>
