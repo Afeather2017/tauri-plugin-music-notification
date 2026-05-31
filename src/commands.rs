@@ -80,9 +80,7 @@ pub(crate) async fn set_playing_queue<R: Runtime>(
 }
 
 #[command]
-pub(crate) async fn get_playback_session<R: Runtime>(
-    app: AppHandle<R>,
-) -> Result<PlaybackSession> {
+pub(crate) async fn get_playback_session<R: Runtime>(app: AppHandle<R>) -> Result<PlaybackSession> {
     app.music_notification().get_playback_session()
 }
 
@@ -140,5 +138,6 @@ pub(crate) async fn set_headset_media_button_disabled<R: Runtime>(
     app: AppHandle<R>,
     payload: SetHeadsetMediaButtonDisabledRequest,
 ) -> Result<EmptyResponse> {
-    app.music_notification().set_headset_media_button_disabled(payload)
+    app.music_notification()
+        .set_headset_media_button_disabled(payload)
 }
