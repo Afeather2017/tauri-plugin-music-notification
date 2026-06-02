@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.view.KeyEvent
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -373,23 +374,6 @@ class MusicPlayerService : Service() {
     private var artworkGeneration = 0L
     private val lufsRequestsInFlight = Collections.synchronizedSet(mutableSetOf<Long>())
 
-    /**
-     * Headset or system media transport controls can reach MediaSession callbacks directly
-     * without going through ACTION_MEDIA_BUTTON intents. Guard those callbacks here as well
-     * so the persisted disable setting is enforced consistently.
-     *
-     * Related UI toggle:
-     * frontend/src/components/modals/SettingsModal.vue
-     */
-    private fun shouldIgnoreExternalMediaSessionControl(actionName: String): Boolean {
-        if (!headsetMediaButtonDisabled) {
-            return false
-        }
-
-        Log.d(TAG, "MediaSession callback: ignoring $actionName because headset media buttons are disabled")
-        return true
-    }
-
     private fun updateServiceLifetime() {
         if (!httpServerRunning && !musicPlayerActive) {
             Log.d(TAG, "Both server and player done, stopping service")
@@ -423,10 +407,23 @@ class MusicPlayerService : Service() {
         restorePersistedSession()
 
         mediaSession.setCallback(object : MediaSessionCompat.Callback() {
-            override fun onPlay() {
-                if (shouldIgnoreExternalMediaSessionControl("onPlay")) {
-                    return
+            override fun onMediaButtonEvent(mediaButtonEvent: Intent?): Boolean {
+                val keyEvent = mediaButtonEvent?.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                if (keyEvent != null) {
+                    Log.d(
+                        TAG,
+                        "MediaSession callback: onMediaButtonEvent keyCode=${keyEvent.keyCode} action=${keyEvent.action} disabled=$headsetMediaButtonDisabled"
+                    )
                 }
+                if (headsetMediaButtonDisabled && keyEvent?.action == KeyEvent.ACTION_DOWN) {
+                    Log.d(TAG, "MediaSession callback: ignoring media button keyCode=${keyEvent.keyCode} because headset media buttons are disabled")
+                    return true
+                }
+
+                return super.onMediaButtonEvent(mediaButtonEvent)
+            }
+
+            override fun onPlay() {
                 Log.d(TAG, "MediaSession callback: onPlay, mediaPlayer=${mediaPlayer != null}, queueSize=${tracks.size}")
                 if (mediaPlayer == null && currentTrackIndex in tracks.indices) {
                     playCurrentTrack()
@@ -436,41 +433,26 @@ class MusicPlayerService : Service() {
             }
 
             override fun onPause() {
-                if (shouldIgnoreExternalMediaSessionControl("onPause")) {
-                    return
-                }
                 Log.d(TAG, "MediaSession callback: onPause")
                 pauseMusic()
             }
 
             override fun onSkipToNext() {
-                if (shouldIgnoreExternalMediaSessionControl("onSkipToNext")) {
-                    return
-                }
                 Log.d(TAG, "MediaSession callback: onSkipToNext")
                 playNextTrack()
             }
 
             override fun onSkipToPrevious() {
-                if (shouldIgnoreExternalMediaSessionControl("onSkipToPrevious")) {
-                    return
-                }
                 Log.d(TAG, "MediaSession callback: onSkipToPrevious")
                 playPreviousTrack()
             }
 
             override fun onStop() {
-                if (shouldIgnoreExternalMediaSessionControl("onStop")) {
-                    return
-                }
                 Log.d(TAG, "MediaSession callback: onStop")
                 stopMusic(clearQueue = false)
             }
 
             override fun onSeekTo(pos: Long) {
-                if (shouldIgnoreExternalMediaSessionControl("onSeekTo")) {
-                    return
-                }
                 Log.d(TAG, "MediaSession callback: onSeekTo $pos")
                 mediaPlayer?.seekTo(pos.toInt())
                 persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
