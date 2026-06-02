@@ -373,6 +373,23 @@ class MusicPlayerService : Service() {
     private var artworkGeneration = 0L
     private val lufsRequestsInFlight = Collections.synchronizedSet(mutableSetOf<Long>())
 
+    /**
+     * Headset or system media transport controls can reach MediaSession callbacks directly
+     * without going through ACTION_MEDIA_BUTTON intents. Guard those callbacks here as well
+     * so the persisted disable setting is enforced consistently.
+     *
+     * Related UI toggle:
+     * frontend/src/components/modals/SettingsModal.vue
+     */
+    private fun shouldIgnoreExternalMediaSessionControl(actionName: String): Boolean {
+        if (!headsetMediaButtonDisabled) {
+            return false
+        }
+
+        Log.d(TAG, "MediaSession callback: ignoring $actionName because headset media buttons are disabled")
+        return true
+    }
+
     private fun updateServiceLifetime() {
         if (!httpServerRunning && !musicPlayerActive) {
             Log.d(TAG, "Both server and player done, stopping service")
@@ -407,6 +424,9 @@ class MusicPlayerService : Service() {
 
         mediaSession.setCallback(object : MediaSessionCompat.Callback() {
             override fun onPlay() {
+                if (shouldIgnoreExternalMediaSessionControl("onPlay")) {
+                    return
+                }
                 Log.d(TAG, "MediaSession callback: onPlay, mediaPlayer=${mediaPlayer != null}, queueSize=${tracks.size}")
                 if (mediaPlayer == null && currentTrackIndex in tracks.indices) {
                     playCurrentTrack()
@@ -416,26 +436,41 @@ class MusicPlayerService : Service() {
             }
 
             override fun onPause() {
+                if (shouldIgnoreExternalMediaSessionControl("onPause")) {
+                    return
+                }
                 Log.d(TAG, "MediaSession callback: onPause")
                 pauseMusic()
             }
 
             override fun onSkipToNext() {
+                if (shouldIgnoreExternalMediaSessionControl("onSkipToNext")) {
+                    return
+                }
                 Log.d(TAG, "MediaSession callback: onSkipToNext")
                 playNextTrack()
             }
 
             override fun onSkipToPrevious() {
+                if (shouldIgnoreExternalMediaSessionControl("onSkipToPrevious")) {
+                    return
+                }
                 Log.d(TAG, "MediaSession callback: onSkipToPrevious")
                 playPreviousTrack()
             }
 
             override fun onStop() {
+                if (shouldIgnoreExternalMediaSessionControl("onStop")) {
+                    return
+                }
                 Log.d(TAG, "MediaSession callback: onStop")
                 stopMusic(clearQueue = false)
             }
 
             override fun onSeekTo(pos: Long) {
+                if (shouldIgnoreExternalMediaSessionControl("onSeekTo")) {
+                    return
+                }
                 Log.d(TAG, "MediaSession callback: onSeekTo $pos")
                 mediaPlayer?.seekTo(pos.toInt())
                 persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
@@ -1390,35 +1425,35 @@ class MusicPlayerService : Service() {
         } else {
             "No song is playing"
         }
+        val playPauseIntent = if (isPlaying) {
+            createServiceActionPendingIntent(ACTION_PAUSE, 2)
+        } else {
+            createServiceActionPendingIntent(ACTION_RESUME, 3)
+        }
 
         val playPauseAction = NotificationCompat.Action(
             if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
             if (isPlaying) "Pause" else "Play",
-            MediaButtonReceiver.buildMediaButtonPendingIntent(
-                this,
-                if (isPlaying) PlaybackStateCompat.ACTION_PAUSE else PlaybackStateCompat.ACTION_PLAY
-            )
+            playPauseIntent
         )
 
         val previousAction = NotificationCompat.Action(
             android.R.drawable.ic_media_previous,
             "Previous",
-            MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)
+            createServiceActionPendingIntent(ACTION_PREVIOUS, 1)
         )
 
         val nextAction = NotificationCompat.Action(
             android.R.drawable.ic_media_next,
             "Next",
-            MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_SKIP_TO_NEXT)
+            createServiceActionPendingIntent(ACTION_NEXT, 4)
         )
 
         builder.setContentTitle(title)
             .setContentText(description?.subtitle ?: "")
             .setSubText(description?.description ?: "")
             .setContentIntent(controller.sessionActivity)
-            .setDeleteIntent(
-                MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_STOP)
-            )
+            .setDeleteIntent(createServiceActionPendingIntent(ACTION_STOP, 5))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setLargeIcon(currentArtworkBitmap)
@@ -1435,39 +1470,44 @@ class MusicPlayerService : Service() {
         return builder.build()
     }
 
+    private fun createServiceActionPendingIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, MusicPlayerService::class.java).apply {
+            this.action = action
+        }
+        return PendingIntent.getService(
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     private fun updateNotification() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, createNotification())
     }
 
     private fun updatePlaybackState() {
+        val availableActions = PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackStateCompat.ACTION_STOP or
+            PlaybackStateCompat.ACTION_SEEK_TO
+
         mediaPlayer?.let {
             val isPlaying = it.isPlaying
             val state = if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
             val position = it.currentPosition.toLong()
 
             val playbackState = PlaybackStateCompat.Builder()
-                .setActions(
-                    PlaybackStateCompat.ACTION_PLAY or
-                        PlaybackStateCompat.ACTION_PAUSE or
-                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                        PlaybackStateCompat.ACTION_STOP or
-                        PlaybackStateCompat.ACTION_SEEK_TO
-                )
+                .setActions(availableActions)
                 .setState(state, position, 1.0f)
                 .build()
             mediaSession.setPlaybackState(playbackState)
         } ?: run {
             val playbackState = PlaybackStateCompat.Builder()
-                .setActions(
-                    PlaybackStateCompat.ACTION_PLAY or
-                        PlaybackStateCompat.ACTION_PAUSE or
-                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                        PlaybackStateCompat.ACTION_STOP or
-                        PlaybackStateCompat.ACTION_SEEK_TO
-                )
+                .setActions(availableActions)
                 .setState(PlaybackStateCompat.STATE_STOPPED, 0L, 0f)
                 .build()
             mediaSession.setPlaybackState(playbackState)
