@@ -41,6 +41,7 @@ class MusicPlayerService : Service() {
         private const val PREF_SESSION = "playback_session"
         private const val PREF_NORMALIZATION = "normalization_config"
         private const val PREF_DISABLE_HEADSET_MEDIA_BUTTON = "disable_headset_media_button"
+        private const val PREF_PAUSE_AFTER_DEADLINE = "pause_after_deadline"
         private const val LUFS_POLL_DELAY_MS = 1000L
         private const val LUFS_POLL_MAX_ATTEMPTS = 8
 
@@ -167,6 +168,36 @@ class MusicPlayerService : Service() {
         fun setHeadsetMediaButtonDisabled(context: Context, disabled: Boolean) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(PREF_DISABLE_HEADSET_MEDIA_BUTTON, disabled).apply()
+        }
+
+        fun loadPersistedPauseAfterDeadline(context: Context): Long {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getLong(PREF_PAUSE_AFTER_DEADLINE, 0L)
+        }
+
+        fun savePersistedPauseAfterDeadline(context: Context, deadlineMs: Long) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putLong(PREF_PAUSE_AFTER_DEADLINE, deadlineMs).apply()
+        }
+
+        fun computePauseAfterDeadline(delayMs: Long, nowMs: Long): Long {
+            if (delayMs <= 0L) {
+                return 0L
+            }
+
+            return if (Long.MAX_VALUE - nowMs < delayMs) {
+                Long.MAX_VALUE
+            } else {
+                nowMs + delayMs
+            }
+        }
+
+        fun computeRemainingPauseAfterDelay(deadlineMs: Long, nowMs: Long): Long {
+            if (deadlineMs <= 0L) {
+                return 0L
+            }
+
+            return maxOf(0L, deadlineMs - nowMs)
         }
 
         private fun parseSessionJson(json: JSONObject): SessionSnapshot {
@@ -370,12 +401,13 @@ class MusicPlayerService : Service() {
     private var prepareStartTime = 0L
     private var playTrackCallStartTime = 0L
     private var pendingSeekPositionMs: Long? = null
+    private var pauseAfterDeadlineMs = 0L
     private var currentArtworkBitmap: Bitmap? = null
     private var artworkGeneration = 0L
     private val lufsRequestsInFlight = Collections.synchronizedSet(mutableSetOf<Long>())
 
     private fun updateServiceLifetime() {
-        if (!httpServerRunning && !musicPlayerActive) {
+        if (!httpServerRunning && !musicPlayerActive && pauseAfterDeadlineMs <= 0L) {
             Log.d(TAG, "Both server and player done, stopping service")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -405,6 +437,7 @@ class MusicPlayerService : Service() {
         }
         Log.d(TAG, "onCreate: MusicPlayerService created, restoring persisted session")
         restorePersistedSession()
+        restorePauseAfterSchedule()
 
         mediaSession.setCallback(object : MediaSessionCompat.Callback() {
             override fun onMediaButtonEvent(mediaButtonEvent: Intent?): Boolean {
@@ -671,6 +704,25 @@ class MusicPlayerService : Service() {
             Log.d(TAG, "restorePersistedSession: set metadata for ${track.name}, durationMs=${snapshot.runtime.durationMs}")
         }
         updatePlaybackState()
+    }
+
+    private fun restorePauseAfterSchedule() {
+        val persistedDeadlineMs = loadPersistedPauseAfterDeadline(this)
+        if (persistedDeadlineMs <= 0L) {
+            pauseAfterDeadlineMs = 0L
+            return
+        }
+
+        pauseAfterDeadlineMs = persistedDeadlineMs
+        val remainingDelayMs = computeRemainingPauseAfterDelay(
+            persistedDeadlineMs,
+            System.currentTimeMillis()
+        )
+        Log.d(
+            TAG,
+            "restorePauseAfterSchedule: deadlineMs=$persistedDeadlineMs remainingDelayMs=$remainingDelayMs"
+        )
+        schedulePauseAfterAt(persistedDeadlineMs)
     }
 
     private fun buildSessionSnapshot(): SessionSnapshot {
@@ -1283,29 +1335,74 @@ class MusicPlayerService : Service() {
         } ?: Log.w(TAG, "MediaPlayer is null")
     }
 
-    private fun schedulePauseAfter(delayMs: Long) {
+    private fun clearPauseAfterRunnable() {
         pauseAfterRunnable?.let(handler::removeCallbacks)
         pauseAfterRunnable = null
+    }
 
-        if (delayMs <= 0L) {
-            Log.d(TAG, "schedulePauseAfter: cleared pending timed pause")
+    private fun clearPauseAfterState() {
+        clearPauseAfterRunnable()
+        pauseAfterDeadlineMs = 0L
+        savePersistedPauseAfterDeadline(this, 0L)
+    }
+
+    private fun triggerTimedPause(deadlineMs: Long) {
+        Log.d(TAG, "Timed pause fired at deadlineMs=$deadlineMs")
+        clearPauseAfterState()
+        pauseMusic()
+    }
+
+    private fun schedulePauseAfterAt(deadlineMs: Long) {
+        clearPauseAfterRunnable()
+
+        if (deadlineMs <= 0L) {
+            clearPauseAfterState()
+            Log.d(TAG, "schedulePauseAfterAt: cleared pending timed pause")
+            updateServiceLifetime()
+            return
+        }
+
+        pauseAfterDeadlineMs = deadlineMs
+        savePersistedPauseAfterDeadline(this, deadlineMs)
+
+        val remainingDelayMs = computeRemainingPauseAfterDelay(
+            deadlineMs,
+            System.currentTimeMillis()
+        )
+        if (remainingDelayMs <= 0L) {
+            Log.d(TAG, "schedulePauseAfterAt: deadline already expired, triggering pause immediately")
+            handler.post {
+                if (pauseAfterDeadlineMs == deadlineMs) {
+                    triggerTimedPause(deadlineMs)
+                }
+            }
             return
         }
 
         val runnable = Runnable {
-            Log.d(TAG, "Timed pause fired after ${delayMs}ms")
-            pauseAfterRunnable = null
-            pauseMusic()
+            if (pauseAfterDeadlineMs != deadlineMs) {
+                Log.d(TAG, "Ignoring stale timed pause callback for deadlineMs=$deadlineMs")
+                return@Runnable
+            }
+
+            Log.d(TAG, "Timed pause fired after ${remainingDelayMs}ms")
+            triggerTimedPause(deadlineMs)
         }
         pauseAfterRunnable = runnable
-        handler.postDelayed(runnable, delayMs)
-        Log.d(TAG, "schedulePauseAfter: scheduled timed pause in ${delayMs}ms")
+        handler.postDelayed(runnable, remainingDelayMs)
+        Log.d(
+            TAG,
+            "schedulePauseAfterAt: scheduled timed pause in ${remainingDelayMs}ms deadlineMs=$deadlineMs"
+        )
+    }
+
+    private fun schedulePauseAfter(delayMs: Long) {
+        val deadlineMs = computePauseAfterDeadline(delayMs, System.currentTimeMillis())
+        schedulePauseAfterAt(deadlineMs)
     }
 
     private fun stopMusic(clearQueue: Boolean) {
         handler.removeCallbacks(progressRunnable)
-        pauseAfterRunnable?.let(handler::removeCallbacks)
-        pauseAfterRunnable = null
         mediaPlayer?.let { player ->
             try {
                 if (player.isPlaying) {
@@ -1503,8 +1600,7 @@ class MusicPlayerService : Service() {
         super.onDestroy()
         instance = null
         handler.removeCallbacks(progressRunnable)
-        pauseAfterRunnable?.let(handler::removeCallbacks)
-        pauseAfterRunnable = null
+        clearPauseAfterRunnable()
         mediaSession.release()
         mediaPlayer?.apply {
             try {
