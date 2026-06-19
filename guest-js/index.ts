@@ -161,6 +161,7 @@ export interface SetNormalizationConfigOptions {
   mode: NormalizationMode;
   manualVolume: number;
   fixedLufs: number;
+  lufsPrecacheCount?: number;
 }
 
 export async function setNormalizationConfig(

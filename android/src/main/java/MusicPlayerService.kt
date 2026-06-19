@@ -44,6 +44,9 @@ class MusicPlayerService : Service() {
         private const val PREF_PAUSE_AFTER_DEADLINE = "pause_after_deadline"
         private const val LUFS_POLL_DELAY_MS = 1000L
         private const val LUFS_POLL_MAX_ATTEMPTS = 8
+        private const val DEFAULT_LUFS_PRECACHE_COUNT = 5
+        private const val MIN_LUFS_PRECACHE_COUNT = 0
+        private const val MAX_LUFS_PRECACHE_COUNT = 20
 
         const val ACTION_PLAY = "com.plugin.music_notification.PLAY"
         const val ACTION_PAUSE = "com.plugin.music_notification.PAUSE"
@@ -70,6 +73,7 @@ class MusicPlayerService : Service() {
         const val EXTRA_NORMALIZATION_MODE = "normalizationMode"
         const val EXTRA_MANUAL_VOLUME = "manualVolume"
         const val EXTRA_FIXED_LUFS = "fixedLufs"
+        const val EXTRA_LUFS_PRECACHE_COUNT = "lufsPrecacheCount"
 
         var instance: MusicPlayerService? = null
 
@@ -129,8 +133,13 @@ class MusicPlayerService : Service() {
         data class NormalizationConfig(
             val mode: String = "auto",
             val manualVolume: Float = 0.5f,
-            val fixedLufs: Double = -27.0
+            val fixedLufs: Double = -27.0,
+            val lufsPrecacheCount: Int = DEFAULT_LUFS_PRECACHE_COUNT
         )
+
+        fun normalizeLufsPrecacheCount(count: Int): Int {
+            return count.coerceIn(MIN_LUFS_PRECACHE_COUNT, MAX_LUFS_PRECACHE_COUNT)
+        }
 
         fun loadNormalizationConfig(context: Context): NormalizationConfig {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -141,7 +150,10 @@ class MusicPlayerService : Service() {
                 NormalizationConfig(
                     mode = json.optString("mode", "auto"),
                     manualVolume = json.optDouble("manualVolume", 0.5).toFloat(),
-                    fixedLufs = json.optDouble("fixedLufs", -27.0)
+                    fixedLufs = json.optDouble("fixedLufs", -27.0),
+                    lufsPrecacheCount = normalizeLufsPrecacheCount(
+                        json.optInt("lufsPrecacheCount", DEFAULT_LUFS_PRECACHE_COUNT)
+                    )
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to parse normalization config", e)
@@ -155,6 +167,10 @@ class MusicPlayerService : Service() {
             json.put("mode", config.mode)
             json.put("manualVolume", config.manualVolume.toDouble())
             json.put("fixedLufs", config.fixedLufs)
+            json.put(
+                "lufsPrecacheCount",
+                normalizeLufsPrecacheCount(config.lufsPrecacheCount)
+            )
             prefs.edit()
                 .putString(PREF_NORMALIZATION, json.toString())
                 .apply()
@@ -615,7 +631,13 @@ class MusicPlayerService : Service() {
                             it.getStringExtra(EXTRA_NORMALIZATION_MODE)
                         ),
                         manualVolume = it.getFloatExtra(EXTRA_MANUAL_VOLUME, 0.5f),
-                        fixedLufs = it.getDoubleExtra(EXTRA_FIXED_LUFS, -27.0)
+                        fixedLufs = it.getDoubleExtra(EXTRA_FIXED_LUFS, -27.0),
+                        lufsPrecacheCount = normalizeLufsPrecacheCount(
+                            it.getIntExtra(
+                                EXTRA_LUFS_PRECACHE_COUNT,
+                                normalizationConfig.lufsPrecacheCount
+                            )
+                        )
                     )
                     val changed = newConfig != normalizationConfig
                     normalizationConfig = newConfig
@@ -623,7 +645,7 @@ class MusicPlayerService : Service() {
                     if (changed) {
                         Log.i(
                             TAG,
-                            "Normalization config changed: mode=${normalizationConfig.mode} manual=${normalizationConfig.manualVolume} fixed=${normalizationConfig.fixedLufs}"
+                            "Normalization config changed: mode=${normalizationConfig.mode} manual=${normalizationConfig.manualVolume} fixed=${normalizationConfig.fixedLufs} queuePrecache=${normalizationConfig.lufsPrecacheCount}"
                         )
                     }
                     val currentTrack = tracks.getOrNull(currentTrackIndex)
@@ -900,27 +922,6 @@ class MusicPlayerService : Service() {
         return updatedTrack
     }
 
-    private fun getNextTrackForPrecache(): QueueSongInfo? {
-        if (currentTrackIndex !in tracks.indices || tracks.isEmpty()) {
-            return null
-        }
-
-        val nextIndex = if (playMode == "loop") {
-            currentTrackIndex
-        } else if (currentTrackIndex >= tracks.lastIndex) {
-            0
-        } else {
-            currentTrackIndex + 1
-        }
-
-        if (nextIndex !in tracks.indices || nextIndex == currentTrackIndex) {
-            return null
-        }
-
-        val nextTrack = tracks[nextIndex]
-        return if (nextTrack.lufs == null) nextTrack else null
-    }
-
     private fun resolveTrackLufsAsync(
         track: QueueSongInfo,
         reason: String,
@@ -982,15 +983,69 @@ class MusicPlayerService : Service() {
         }.start()
     }
 
-    private fun precacheNextTrack() {
-        val nextTrack = getNextTrackForPrecache() ?: return
-        Log.d(TAG, "precacheNextTrack: scheduling LUFS pre-cache for next track=${nextTrack.name}")
-        resolveTrackLufsAsync(
-            track = nextTrack,
-            reason = "next",
-            retryUntilResolved = true,
-            applyVolumeIfCurrent = false
-        )
+    private fun precacheQueueTracks(fallbackCurrentTrack: QueueSongInfo? = null) {
+        val precacheCount = normalizeLufsPrecacheCount(normalizationConfig.lufsPrecacheCount)
+        if (precacheCount == 0) {
+            Log.d(TAG, "precacheQueueTracks: disabled by config")
+            return
+        }
+
+        if (tracks.isEmpty() || currentTrackIndex !in tracks.indices) {
+            if (fallbackCurrentTrack == null || fallbackCurrentTrack.lufs != null) {
+                Log.d(
+                    TAG,
+                    "precacheQueueTracks: skipping queueSize=${tracks.size} currentTrackIndex=$currentTrackIndex"
+                )
+                return
+            }
+
+            Log.d(
+                TAG,
+                "precacheQueueTracks: scheduling fallback current track=${fallbackCurrentTrack.name}"
+            )
+            resolveTrackLufsAsync(
+                track = fallbackCurrentTrack,
+                reason = "current",
+                retryUntilResolved = true,
+                applyVolumeIfCurrent = true
+            )
+            return
+        }
+
+        val startIndex = currentTrackIndex
+        val currentTrack = tracks[startIndex]
+        val maxPositions = if (playMode == "loop") 1 else tracks.size
+        val requestedTrackKeys = mutableSetOf<String>()
+        var queuedCount = 0
+
+        for (offset in 0 until maxPositions) {
+            val track = tracks[(startIndex + offset) % tracks.size]
+            if (track.lufs != null) {
+                continue
+            }
+
+            val requestKey = if (track.id > 0L) "id:${track.id}" else "url:${track.url}"
+            if (!requestedTrackKeys.add(requestKey)) {
+                continue
+            }
+
+            val isCurrentTrack = track.id == currentTrack.id && track.url == currentTrack.url
+            queuedCount += 1
+            Log.d(
+                TAG,
+                "precacheQueueTracks: scheduling track=${track.name} reason=${if (isCurrentTrack) "current" else "queue"} queuedCount=$queuedCount/$precacheCount"
+            )
+            resolveTrackLufsAsync(
+                track = track,
+                reason = if (isCurrentTrack) "current" else "queue",
+                retryUntilResolved = true,
+                applyVolumeIfCurrent = isCurrentTrack
+            )
+
+            if (queuedCount >= precacheCount) {
+                return
+            }
+        }
     }
 
     private fun normalizeNormalizationMode(mode: String?): String {
@@ -1165,15 +1220,6 @@ class MusicPlayerService : Service() {
     fun playTrack(track: QueueSongInfo, artist: String = "Unknown Artist", album: String = "Unknown Album") {
         lufsResolutionGeneration += 1
         playTrackInternal(track, artist, album)
-
-        if (track.lufs == null) {
-            resolveTrackLufsAsync(
-                track = track,
-                reason = "current",
-                retryUntilResolved = false,
-                applyVolumeIfCurrent = true
-            )
-        }
     }
 
     private fun playTrackInternal(track: QueueSongInfo, artist: String = "Unknown Artist", album: String = "Unknown Album") {
@@ -1273,7 +1319,7 @@ class MusicPlayerService : Service() {
                     loadArtworkForTrackAsync(track, artist, album, mp.duration.toLong())
                     persistSession(isPlayingOverride = false)
                     resumeMusic()
-                    precacheNextTrack()
+                    precacheQueueTracks(track)
                 }
 
                 setOnErrorListener { _, what, extra ->

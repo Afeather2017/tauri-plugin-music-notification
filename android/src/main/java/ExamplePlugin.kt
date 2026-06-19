@@ -47,6 +47,7 @@ class SetNormalizationConfigArgs {
   var mode: String = "auto"
   var manualVolume: Float = 0.5f
   var fixedLufs: Double = -27.0
+  var lufsPrecacheCount: Int = 5
 }
 
 @InvokeArg
@@ -551,6 +552,7 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
                 putExtra(MusicPlayerService.EXTRA_NORMALIZATION_MODE, args.mode)
                 putExtra(MusicPlayerService.EXTRA_MANUAL_VOLUME, args.manualVolume)
                 putExtra(MusicPlayerService.EXTRA_FIXED_LUFS, args.fixedLufs)
+                putExtra(MusicPlayerService.EXTRA_LUFS_PRECACHE_COUNT, args.lufsPrecacheCount)
             }
             activity.startService(serviceIntent)
 

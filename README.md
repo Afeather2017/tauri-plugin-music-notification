@@ -195,7 +195,7 @@ Support varies by Android version and device hardware.
 ### JavaScript/TypeScript
 
 ```typescript
-import { play, pause, resume, stop, next, previous, seek, getState, setPlayingQueue, setVolume } from 'music-notification-api';
+import { play, pause, resume, stop, next, previous, seek, getState, setPlayingQueue, setVolume, setNormalizationConfig } from 'music-notification-api';
 
 // Play music
 await play({
@@ -244,6 +244,14 @@ await seek(30000); // Seek to 30 seconds
 
 // Set volume (0.0 to 1.0)
 await setVolume({ volume: 0.5 }); // Set to 50%
+
+// Set normalization config and queue LUFS pre-cache count
+await setNormalizationConfig({
+  mode: "auto",
+  manualVolume: 0.5,
+  fixedLufs: -27,
+  lufsPrecacheCount: 5
+});
 
 // Get current playback state
 const state = await getState();
@@ -344,6 +352,18 @@ Sets the playback volume for the current music player.
 **Returns:** `Promise<{ success: boolean; message?: string }>`
 
 **Note:** This controls only the app's audio volume, not the system volume. The actual output also depends on the system's media volume level.
+
+### `setNormalizationConfig(options: SetNormalizationConfigOptions)`
+
+Updates the mobile normalization mode and LUFS queue pre-cache behavior.
+
+**Parameters:**
+- `mode` (`"auto" | "manual" | "fixed"`): Normalization mode
+- `manualVolume` (number): Manual fallback volume from `0.0` to `1.0`
+- `fixedLufs` (number): Target LUFS used when `mode` is `"fixed"`
+- `lufsPrecacheCount` (number, optional): Number of missing-LUFS queue items to pre-cache from the current track onward. Clamped to `0..20`, default `5`.
+
+**Returns:** `Promise<{ success: boolean; message?: string }>`
 
 ## Platform Support
 

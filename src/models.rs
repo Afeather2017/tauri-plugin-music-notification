@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_lufs_precache_count() -> u32 {
+    5
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PingRequest {
@@ -143,6 +147,8 @@ pub struct SetNormalizationConfigRequest {
     pub mode: NormalizationMode,
     pub manual_volume: f32,
     pub fixed_lufs: f64,
+    #[serde(default = "default_lufs_precache_count")]
+    pub lufs_precache_count: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
