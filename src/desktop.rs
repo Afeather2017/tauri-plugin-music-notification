@@ -15,10 +15,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
     _api: PluginApi<R, C>,
 ) -> crate::Result<MusicNotification<R>> {
-    Ok(MusicNotification(
-        app.clone(),
-        MusicNotificationState,
-    ))
+    Ok(MusicNotification(app.clone(), MusicNotificationState))
 }
 
 /// Access to the music-notification APIs.
