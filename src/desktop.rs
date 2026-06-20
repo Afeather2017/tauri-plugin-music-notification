@@ -17,7 +17,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 ) -> crate::Result<MusicNotification<R>> {
     Ok(MusicNotification(
         app.clone(),
-        MusicNotificationState::default(),
+        MusicNotificationState,
     ))
 }
 
