@@ -60,6 +60,8 @@ class QueueSongArgs {
   var id: Long = -1L
   var name: String = ""
   var path: String = ""
+  var deviceId: String? = null
+  var sourceKind: String? = null
   var url: String = ""
   var lufs: Double? = null
   var coverUrl: String? = null
@@ -342,6 +344,8 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
                     id = it.id,
                     name = it.name,
                     path = it.path,
+                    deviceId = it.deviceId,
+                    sourceKind = it.sourceKind,
                     url = it.url,
                     lufs = it.lufs,
                     coverUrl = it.coverUrl
@@ -349,6 +353,15 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
             }
             val playMode = args.playMode ?: "sequential"
             val service = MusicPlayerService.instance
+            val selectedIndex = args.queue.currentIndex ?: 0
+            val selectedSong = songs.getOrNull(selectedIndex)
+            Log.i(
+                TAG,
+                "Command setPlayingQueue(): queueSize=${songs.size} currentIndex=${args.queue.currentIndex} " +
+                    "serviceAvailable=${service != null} track=${selectedSong?.name} songId=${selectedSong?.id} " +
+                    "deviceId=${selectedSong?.deviceId} sourceKind=${selectedSong?.sourceKind} " +
+                    "hasLegacyUrl=${selectedSong?.url?.isNotBlank()}"
+            )
 
             if (service != null) {
                 service.setPlayingQueue(songs, args.queue.currentIndex, playMode)
@@ -391,6 +404,8 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
                 songObj.put("id", song.id)
                 songObj.put("name", song.name)
                 songObj.put("path", song.path)
+                songObj.put("deviceId", song.deviceId)
+                songObj.put("sourceKind", song.sourceKind)
                 songObj.put("url", song.url)
                 songObj.put("lufs", song.lufs)
                 songObj.put("coverUrl", song.coverUrl)

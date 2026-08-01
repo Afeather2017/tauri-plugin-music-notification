@@ -28,7 +28,9 @@ export interface QueueSong {
   id: number;
   name: string;
   path: string;
-  url: string;
+  deviceId?: string | null;
+  sourceKind?: 'kaulan' | 'local_raw' | 'temporary' | 'legacy';
+  url?: string;
   lufs: number | null;
   coverUrl?: string | null;
 }

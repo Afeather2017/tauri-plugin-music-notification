@@ -79,6 +79,9 @@ pub struct QueueSong {
     pub id: i64,
     pub name: String,
     pub path: String,
+    pub device_id: Option<String>,
+    pub source_kind: Option<String>,
+    #[serde(default)]
     pub url: String,
     pub lufs: Option<f64>,
     pub cover_url: Option<String>,
