@@ -420,9 +420,22 @@ class MusicPlayerService : Service() {
                 "deviceId=${track.deviceId} sourceKind=${track.sourceKind} " +
                 "hasLegacyUrl=${track.url.isNotBlank()}"
         )
-        if (track.sourceKind == "kaulan") {
+        val hasHttpPath = track.path.startsWith("http://", ignoreCase = true) ||
+            track.path.startsWith("https://", ignoreCase = true)
+        val requiresDeviceResolution = track.sourceKind == "kaulan" ||
+            (track.sourceKind == "local_raw" && hasHttpPath && !track.deviceId.isNullOrBlank())
+
+        if (requiresDeviceResolution) {
+            if (track.sourceKind == "local_raw") {
+                Log.w(
+                    TAG,
+                    "Correcting HTTP track classified as local_raw: track=${track.name} " +
+                        "songId=${track.id} deviceId=${track.deviceId} path=${track.path}"
+                )
+            }
             return track.deviceId?.let(::resolveDeviceApiBase)?.let { apiBase ->
                 track.copy(
+                    sourceKind = "kaulan",
                     path = "",
                     url = "$apiBase/music/id/${track.id}",
                     coverUrl = "$apiBase/music/id/${track.id}/cover"
