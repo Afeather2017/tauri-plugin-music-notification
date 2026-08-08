@@ -206,19 +206,22 @@ await play({
   coverUrl: "https://example.com/song-cover.jpg"
 });
 
-// Identity-based queue playback
+// Queue playback with a direct URL. `temporary` tracks carry their own
+// `tempSongUrl` and stay in the live session, but are excluded from the
+// persisted session that survives a process restart. See "Queue source
+// fields" below for the `kaulan` and `local_raw` shapes.
 await setPlayingQueue(
   {
     songs: [
       {
-        id: 1,
-        name: "Remote Song",
-        deviceId: "stable-device-id",
-        sourceKind: "kaulan",
+        id: -1,
+        name: "Preview",
+        deviceId: null,
+        sourceKind: "temporary",
         localUri: null,
-        tempSongUrl: null,
+        tempSongUrl: "https://example.com/song.mp3",
         lufs: null,
-        coverUrl: null
+        coverUrl: "https://example.com/song-cover.jpg"
       }
     ],
     currentIndex: 0
