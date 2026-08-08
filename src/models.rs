@@ -76,15 +76,78 @@ pub enum NormalizationMode {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueSong {
+    /// Database identity for Kaulan tracks, or the caller-provided temporary id.
     pub id: i64,
     pub name: String,
-    pub path: String,
+    /// Stable device identity used to resolve Kaulan playback immediately before play.
     pub device_id: Option<String>,
-    pub source_kind: Option<String>,
+    /// One of `kaulan`, `local_raw`, or `temporary`.
+    pub source_kind: String,
+    /// Direct filesystem or content URI used only by `local_raw` entries.
     #[serde(default)]
-    pub url: String,
+    pub local_uri: Option<String>,
+    /// Ephemeral playback URL used only by `temporary` entries.
+    #[serde(default)]
+    pub temp_song_url: Option<String>,
     pub lufs: Option<f64>,
     pub cover_url: Option<String>,
+}
+
+#[cfg(test)]
+mod queue_song_tests {
+    use super::QueueSong;
+
+    #[test]
+    fn serializes_source_specific_queue_fields_as_camel_case() {
+        let song = QueueSong {
+            id: 42,
+            name: "Remote track".to_string(),
+            device_id: Some("device-a".to_string()),
+            source_kind: "kaulan".to_string(),
+            local_uri: None,
+            temp_song_url: None,
+            lufs: Some(-14.0),
+            cover_url: None,
+        };
+
+        let json = serde_json::to_value(song).expect("queue song should serialize");
+        assert_eq!(json["deviceId"], "device-a");
+        assert_eq!(json["sourceKind"], "kaulan");
+        assert!(json.get("path").is_none());
+        assert!(json.get("url").is_none());
+        assert!(json.get("localUri").is_some());
+        assert!(json.get("tempSongUrl").is_some());
+    }
+
+    #[test]
+    fn deserializes_local_and_temporary_locators() {
+        let local: QueueSong = serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "name": "Local",
+            "deviceId": null,
+            "sourceKind": "local_raw",
+            "localUri": "content://media/1",
+            "lufs": null,
+            "coverUrl": null
+        }))
+        .expect("local queue song should deserialize");
+        assert_eq!(local.local_uri.as_deref(), Some("content://media/1"));
+
+        let temporary: QueueSong = serde_json::from_value(serde_json::json!({
+            "id": -1,
+            "name": "Preview",
+            "deviceId": null,
+            "sourceKind": "temporary",
+            "tempSongUrl": "https://example.test/preview.mp3",
+            "lufs": null,
+            "coverUrl": null
+        }))
+        .expect("temporary queue song should deserialize");
+        assert_eq!(
+            temporary.temp_song_url.as_deref(),
+            Some("https://example.test/preview.mp3")
+        );
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

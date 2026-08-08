@@ -223,18 +223,19 @@ class MusicPlayerService : Service() {
             val songs = mutableListOf<QueueSongInfo>()
             for (i in 0 until songsJson.length()) {
                 val songJson = songsJson.optJSONObject(i) ?: continue
-                songs.add(
-                    QueueSongInfo(
-                        id = songJson.optLong("id", -1L),
-                        name = songJson.optString("name", ""),
-                        path = songJson.optString("path", ""),
-                        deviceId = songJson.optString("deviceId", "").ifBlank { null },
-                        sourceKind = songJson.optString("sourceKind", "").ifBlank { null },
-                        url = songJson.optString("url", ""),
-                        lufs = if (songJson.has("lufs") && !songJson.isNull("lufs")) songJson.optDouble("lufs") else null,
-                        coverUrl = songJson.optString("coverUrl", "").ifBlank { null }
-                    )
+                val song = QueueSongInfo(
+                    id = songJson.optLong("id", -1L),
+                    name = songJson.optString("name", ""),
+                    deviceId = songJson.optString("deviceId", "").ifBlank { null },
+                    sourceKind = songJson.optString("sourceKind", ""),
+                    localUri = songJson.optString("localUri", "").ifBlank { null },
+                    tempSongUrl = songJson.optString("tempSongUrl", "").ifBlank { null },
+                    lufs = if (songJson.has("lufs") && !songJson.isNull("lufs")) songJson.optDouble("lufs") else null,
+                    coverUrl = songJson.optString("coverUrl", "").ifBlank { null }
                 )
+                if (song.hasValidLocator()) {
+                    songs.add(song)
+                }
             }
 
             val runtimeJson = json.optJSONObject("runtime") ?: JSONObject()
@@ -261,19 +262,17 @@ class MusicPlayerService : Service() {
         }
 
         private fun snapshotToJson(snapshot: SessionSnapshot): JSONObject {
+            val durableSnapshot = durableSessionSnapshot(snapshot)
             val queueJson = JSONObject()
             val songsJson = JSONArray()
 
-            snapshot.queue.songs.forEach { song ->
+            durableSnapshot.queue.songs.forEach { song ->
                 val songJson = JSONObject()
                 songJson.put("id", song.id)
                 songJson.put("name", song.name)
-                songJson.put("path", song.path)
                 if (song.deviceId == null) songJson.put("deviceId", JSONObject.NULL) else songJson.put("deviceId", song.deviceId)
-                if (song.sourceKind == null) songJson.put("sourceKind", JSONObject.NULL) else songJson.put("sourceKind", song.sourceKind)
-                // URLs are persisted only for legacy/temporary entries. Normal
-                // Kaulan URLs are resolved from deviceId for every playback.
-                songJson.put("url", if (song.sourceKind == "kaulan") "" else song.url)
+                songJson.put("sourceKind", song.sourceKind)
+                if (song.localUri == null) songJson.put("localUri", JSONObject.NULL) else songJson.put("localUri", song.localUri)
                 if (song.lufs == null) {
                     songJson.put("lufs", JSONObject.NULL)
                 } else {
@@ -288,38 +287,69 @@ class MusicPlayerService : Service() {
             }
 
             queueJson.put("songs", songsJson)
-            if (snapshot.queue.currentIndex == null) {
+            if (durableSnapshot.queue.currentIndex == null) {
                 queueJson.put("currentIndex", JSONObject.NULL)
             } else {
-                queueJson.put("currentIndex", snapshot.queue.currentIndex)
+                queueJson.put("currentIndex", durableSnapshot.queue.currentIndex)
             }
 
             val runtimeJson = JSONObject()
-            runtimeJson.put("isPlaying", snapshot.runtime.isPlaying)
-            runtimeJson.put("positionMs", snapshot.runtime.positionMs)
-            runtimeJson.put("durationMs", snapshot.runtime.durationMs)
+            runtimeJson.put("isPlaying", durableSnapshot.runtime.isPlaying)
+            runtimeJson.put("positionMs", durableSnapshot.runtime.positionMs)
+            runtimeJson.put("durationMs", durableSnapshot.runtime.durationMs)
 
             val json = JSONObject()
             json.put("queue", queueJson)
             json.put("runtime", runtimeJson)
-            json.put("playMode", snapshot.playMode)
-            if (snapshot.currentSongId == null) {
+            json.put("playMode", durableSnapshot.playMode)
+            if (durableSnapshot.currentSongId == null) {
                 json.put("currentSongId", JSONObject.NULL)
             } else {
-                json.put("currentSongId", snapshot.currentSongId)
+                json.put("currentSongId", durableSnapshot.currentSongId)
             }
             return json
+        }
+
+        fun durableSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
+            val retained = snapshot.queue.songs.withIndex()
+                .filter { it.value.sourceKind != "temporary" && it.value.hasValidLocator() }
+            val originalIndex = snapshot.queue.currentIndex
+            val durableIndex = originalIndex?.let { selected ->
+                retained.indexOfFirst { it.index == selected }.takeIf { it >= 0 }
+            }
+            val durableSongs = retained.map { it.value }
+            return snapshot.copy(
+                queue = PlayingQueueSnapshot(durableSongs, durableIndex),
+                runtime = if (durableIndex == null) {
+                    PlaybackRuntimeSnapshot(false, 0L, 0L)
+                } else {
+                    snapshot.runtime
+                },
+                currentSongId = durableIndex?.let { durableSongs[it].id }
+            )
         }
     }
 
     data class QueueSongInfo(
         val id: Long,
         val name: String,
-        val path: String,
         val deviceId: String?,
-        val sourceKind: String?,
-        val url: String,
+        val sourceKind: String,
+        val localUri: String?,
+        val tempSongUrl: String?,
         val lufs: Double?,
+        val coverUrl: String?
+    ) {
+        fun hasValidLocator(): Boolean = when (sourceKind) {
+            "kaulan" -> id > 0L && !deviceId.isNullOrBlank()
+            "local_raw" -> !localUri.isNullOrBlank()
+            "temporary" -> !tempSongUrl.isNullOrBlank()
+            else -> false
+        }
+    }
+
+    data class PlaybackTarget(
+        val audioUrl: String,
         val coverUrl: String?
     )
 
@@ -376,8 +406,7 @@ class MusicPlayerService : Service() {
         Log.i(
             TAG,
             "Playback resolution path entered: index=$currentTrackIndex track=${track.name} " +
-                "songId=${track.id} deviceId=${track.deviceId} sourceKind=${track.sourceKind} " +
-                "hasLegacyUrl=${track.url.isNotBlank()}"
+                "songId=${track.id} deviceId=${track.deviceId} sourceKind=${track.sourceKind}"
         )
         playQueueTrackAt(currentTrackIndex, 1, tracks.size)
     }
@@ -413,41 +442,26 @@ class MusicPlayerService : Service() {
         }
     }
 
-    private fun resolveQueueTrack(track: QueueSongInfo): QueueSongInfo? {
+    private fun resolvePlaybackTarget(track: QueueSongInfo): PlaybackTarget? {
         Log.i(
             TAG,
             "Resolving queue track: track=${track.name} songId=${track.id} " +
-                "deviceId=${track.deviceId} sourceKind=${track.sourceKind} " +
-                "hasLegacyUrl=${track.url.isNotBlank()}"
+                "deviceId=${track.deviceId} sourceKind=${track.sourceKind}"
         )
-        val hasHttpPath = track.path.startsWith("http://", ignoreCase = true) ||
-            track.path.startsWith("https://", ignoreCase = true)
-        val requiresDeviceResolution = track.sourceKind == "kaulan" ||
-            (track.sourceKind == "local_raw" && hasHttpPath && !track.deviceId.isNullOrBlank())
-
-        if (requiresDeviceResolution) {
-            if (track.sourceKind == "local_raw") {
-                Log.w(
-                    TAG,
-                    "Correcting HTTP track classified as local_raw: track=${track.name} " +
-                        "songId=${track.id} deviceId=${track.deviceId} path=${track.path}"
-                )
-            }
-            return track.deviceId?.let(::resolveDeviceApiBase)?.let { apiBase ->
-                track.copy(
-                    sourceKind = "kaulan",
-                    path = "",
-                    url = "$apiBase/music/id/${track.id}",
+        return when (track.sourceKind) {
+            "kaulan" -> track.deviceId?.let(::resolveDeviceApiBase)?.let { apiBase ->
+                PlaybackTarget(
+                    audioUrl = "$apiBase/music/id/${track.id}",
                     coverUrl = "$apiBase/music/id/${track.id}/cover"
                 )
             }
-        }
-
-        return when (track.sourceKind) {
-            "local_raw" -> track.path.takeIf { it.isNotBlank() }?.let {
-                track.copy(url = it, coverUrl = null)
+            "local_raw" -> track.localUri?.takeIf { it.isNotBlank() }?.let {
+                PlaybackTarget(audioUrl = it, coverUrl = track.coverUrl)
             }
-            else -> track.url.takeIf { it.isNotBlank() }?.let { track }
+            "temporary" -> track.tempSongUrl?.takeIf { it.isNotBlank() }?.let {
+                PlaybackTarget(audioUrl = it, coverUrl = track.coverUrl)
+            }
+            else -> null
         }
     }
 
@@ -466,15 +480,15 @@ class MusicPlayerService : Service() {
                 "track=${track.name} deviceId=${track.deviceId} sourceKind=${track.sourceKind}"
         )
         Thread {
-            val resolved = resolveQueueTrack(track)
+            val target = resolvePlaybackTarget(track)
             handler.post {
                 if (generation != resolutionGeneration) {
                     Log.i(TAG, "Discarding stale playback resolution: generation=$generation currentGeneration=$resolutionGeneration")
                     return@post
                 }
-                if (resolved != null) {
+                if (target != null) {
                     currentTrackIndex = normalizedIndex
-                    playTrack(resolved)
+                    playTrack(track, target)
                     return@post
                 }
                 Log.w(TAG, "Skipping unresolved device for track=${track.name} deviceId=${track.deviceId}")
@@ -803,12 +817,8 @@ class MusicPlayerService : Service() {
             TAG,
             "setPlayingQueue: queueSize=${tracks.size} requestedIndex=$currentIndex " +
                 "selectedIndex=$currentTrackIndex track=${selectedTrack?.name} songId=${selectedTrack?.id} " +
-                "deviceId=${selectedTrack?.deviceId} sourceKind=${selectedTrack?.sourceKind} " +
-                "hasLegacyUrl=${selectedTrack?.url?.isNotBlank()}"
+                "deviceId=${selectedTrack?.deviceId} sourceKind=${selectedTrack?.sourceKind}"
         )
-        if (currentTrackIndex in tracks.indices) {
-            currentUrl = tracks[currentTrackIndex].url
-        }
         persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
         updateNotification()
     }
@@ -846,14 +856,12 @@ class MusicPlayerService : Service() {
             else -> snapshot.queue.currentIndex
         }
         playMode = normalizePlayMode(snapshot.playMode)
-        currentUrl = if (currentTrackIndex in tracks.indices) tracks[currentTrackIndex].url else null
         val restoredTrack = tracks.getOrNull(currentTrackIndex)
         Log.i(
             TAG,
             "restorePersistedSession identity: selectedIndex=$currentTrackIndex " +
                 "track=${restoredTrack?.name} songId=${restoredTrack?.id} " +
-                "deviceId=${restoredTrack?.deviceId} sourceKind=${restoredTrack?.sourceKind} " +
-                "hasLegacyUrl=${restoredTrack?.url?.isNotBlank()}"
+                "deviceId=${restoredTrack?.deviceId} sourceKind=${restoredTrack?.sourceKind}"
         )
         musicPlayerActive = snapshot.runtime.isPlaying
 
@@ -950,30 +958,20 @@ class MusicPlayerService : Service() {
     }
 
     private fun playTrackByUrl(url: String, title: String, artist: String, album: String, coverUrl: String?) {
-        val queueIndex = tracks.indexOfFirst { it.url == url }
-        if (queueIndex >= 0) {
-            Log.d(TAG, "playTrackByUrl: matched queueIndex=$queueIndex title=${tracks[queueIndex].name}")
-            currentTrackIndex = queueIndex
-            val track = tracks[queueIndex].copy(coverUrl = coverUrl ?: tracks[queueIndex].coverUrl)
-            tracks[queueIndex] = track
-            playTrack(track, artist, album)
-            return
-        }
-
         val fallbackTrack = QueueSongInfo(
             id = -1L,
             name = title,
-            path = "",
             deviceId = null,
-            sourceKind = "legacy",
-            url = url,
+            sourceKind = "temporary",
+            localUri = null,
+            tempSongUrl = url,
             lufs = null,
             coverUrl = coverUrl
         )
         tracks = mutableListOf(fallbackTrack)
         currentTrackIndex = 0
         playMode = "sequential"
-        playTrack(fallbackTrack, artist, album)
+        playTrack(fallbackTrack, PlaybackTarget(url, coverUrl), artist, album)
     }
 
     private fun buildPrecacheUrl(track: QueueSongInfo): String? {
@@ -982,10 +980,7 @@ class MusicPlayerService : Service() {
             return null
         }
 
-        val resolvedTrack = resolveQueueTrack(track)
-        val precacheBase = resolvedTrack?.url?.takeIf { it.isNotBlank() }
-            ?: track.path.takeIf { it.isNotBlank() }
-            ?: return null
+        val precacheBase = resolvePlaybackTarget(track)?.audioUrl ?: return null
         val parsed = Uri.parse(precacheBase)
         val path = parsed.path ?: return null
         val musicMarker = "/music/id/${track.id}"
@@ -993,7 +988,7 @@ class MusicPlayerService : Service() {
         if (markerIndex < 0) {
             Log.w(
                 TAG,
-                "buildPrecacheUrl: could not derive precache URL from track=${track.name} id=${track.id} path=${track.path} url=${track.url}"
+                "buildPrecacheUrl: could not derive precache URL from track=${track.name} id=${track.id} sourceKind=${track.sourceKind}"
             )
             return null
         }
@@ -1006,6 +1001,13 @@ class MusicPlayerService : Service() {
             .toString()
         Log.d(TAG, "buildPrecacheUrl: track=${track.name} source=$precacheBase precacheUrl=$precacheUrl")
         return precacheUrl
+    }
+
+    private fun trackIdentityKey(track: QueueSongInfo): String = when (track.sourceKind) {
+        "kaulan" -> "kaulan:${track.deviceId}:${track.id}"
+        "local_raw" -> "local:${track.localUri}"
+        "temporary" -> "temporary:${track.tempSongUrl}"
+        else -> "invalid:${track.id}:${track.name}"
     }
 
     private fun requestPrecacheLufs(track: QueueSongInfo): PrecacheLufsResult? {
@@ -1169,12 +1171,12 @@ class MusicPlayerService : Service() {
                 continue
             }
 
-            val requestKey = if (track.id > 0L) "id:${track.id}" else "url:${track.url}"
+            val requestKey = trackIdentityKey(track)
             if (!requestedTrackKeys.add(requestKey)) {
                 continue
             }
 
-            val isCurrentTrack = track.id == currentTrack.id && track.url == currentTrack.url
+            val isCurrentTrack = trackIdentityKey(track) == trackIdentityKey(currentTrack)
             queuedCount += 1
             Log.d(
                 TAG,
@@ -1273,9 +1275,11 @@ class MusicPlayerService : Service() {
         track: QueueSongInfo,
         artist: String,
         album: String,
-        durationMs: Long
+        durationMs: Long,
+        coverUrlOverride: String? = track.coverUrl,
+        expectedPlaybackUrl: String? = null
     ) {
-        val coverUrl = track.coverUrl?.trim()
+        val coverUrl = coverUrlOverride?.trim()
         if (coverUrl.isNullOrEmpty()) {
             currentArtworkBitmap = null
             applyTrackMetadata(track, artist, album, durationMs, null)
@@ -1292,9 +1296,8 @@ class MusicPlayerService : Service() {
             }
 
             handler.post {
-                val isCurrentTrack = currentTrackIndex in tracks.indices &&
-                    tracks[currentTrackIndex].url == track.url
-                if (generation != artworkGeneration || !isCurrentTrack) {
+                val isCurrentPlayback = expectedPlaybackUrl == null || currentUrl == expectedPlaybackUrl
+                if (generation != artworkGeneration || !isCurrentPlayback) {
                     Log.d(TAG, "Ignoring stale artwork result for track=${track.name}")
                     return@post
                 }
@@ -1362,25 +1365,36 @@ class MusicPlayerService : Service() {
         return Bitmap.createScaledBitmap(bitmap, resizedWidth, resizedHeight, true)
     }
 
-    fun playTrack(track: QueueSongInfo, artist: String = "Unknown Artist", album: String = "Unknown Album") {
+    fun playTrack(
+        track: QueueSongInfo,
+        target: PlaybackTarget,
+        artist: String = "Unknown Artist",
+        album: String = "Unknown Album"
+    ) {
         lufsResolutionGeneration += 1
-        playTrackInternal(track, artist, album)
+        playTrackInternal(track, target, artist, album)
     }
 
-    private fun playTrackInternal(track: QueueSongInfo, artist: String = "Unknown Artist", album: String = "Unknown Album") {
+    private fun playTrackInternal(
+        track: QueueSongInfo,
+        target: PlaybackTarget,
+        artist: String = "Unknown Artist",
+        album: String = "Unknown Album"
+    ) {
+        val resolvedUrl = target.audioUrl
         playTrackStartTime = System.currentTimeMillis()
         Log.d(TAG, "========== playTrack called ==========")
         Log.i("KaulanPerf", "playTrack start: track=${track.name}")
-        Log.d(TAG, "Track: ${track.name} (${track.url}) currentTrackIndex=$currentTrackIndex queueSize=${tracks.size}")
+        Log.d(TAG, "Track: ${track.name} ($resolvedUrl) currentTrackIndex=$currentTrackIndex queueSize=${tracks.size}")
 
         musicPlayerActive = true
 
-        if (currentUrl == track.url && mediaPlayer != null && isPrepared) {
+        if (currentUrl == resolvedUrl && mediaPlayer != null && isPrepared) {
             applyTrackVolume(track)
             currentArtworkBitmap = null
             val currentDuration = mediaPlayer?.duration?.toLong() ?: 0L
             applyTrackMetadata(track, artist, album, currentDuration, null)
-            loadArtworkForTrackAsync(track, artist, album, currentDuration)
+            loadArtworkForTrackAsync(track, artist, album, currentDuration, target.coverUrl, resolvedUrl)
             pendingSeekPositionMs?.let { pendingPosition ->
                 val clampedPosition = pendingPosition.coerceAtMost(mediaPlayer?.duration?.toLong() ?: pendingPosition).toInt()
                 mediaPlayer?.seekTo(clampedPosition)
@@ -1411,7 +1425,7 @@ class MusicPlayerService : Service() {
 
         mediaPlayer = null
         isPrepared = false
-        currentUrl = track.url
+        currentUrl = resolvedUrl
         clearArtworkState()
         playbackGeneration += 1
         val generation = playbackGeneration
@@ -1419,7 +1433,7 @@ class MusicPlayerService : Service() {
 
         mediaPlayer = MediaPlayer().apply {
             try {
-                val sourceUri = Uri.parse(track.url)
+                val sourceUri = Uri.parse(resolvedUrl)
                 when (sourceUri.scheme?.lowercase()) {
                     "content" -> {
                         Log.i(TAG, "Using content URI data source for track=${track.name}")
@@ -1434,13 +1448,13 @@ class MusicPlayerService : Service() {
                             TAG,
                             "Using string data source for track=${track.name} scheme=${sourceUri.scheme ?: "none"}"
                         )
-                        setDataSource(track.url)
+                        setDataSource(resolvedUrl)
                     }
                 }
                 prepareStartTime = System.currentTimeMillis()
 
                 setOnPreparedListener { mp ->
-                    if (mediaPlayer !== this || playbackGeneration != generation || currentUrl != track.url) {
+                    if (mediaPlayer !== this || playbackGeneration != generation || currentUrl != resolvedUrl) {
                         Log.d(
                             TAG,
                             "Ignoring stale onPrepared for generation=$generation currentGeneration=$playbackGeneration track=${track.name}"
@@ -1461,14 +1475,14 @@ class MusicPlayerService : Service() {
                     }
                     applyTrackVolume(track)
                     applyTrackMetadata(track, artist, album, mp.duration.toLong(), null)
-                    loadArtworkForTrackAsync(track, artist, album, mp.duration.toLong())
+                    loadArtworkForTrackAsync(track, artist, album, mp.duration.toLong(), target.coverUrl, resolvedUrl)
                     persistSession(isPlayingOverride = false)
                     resumeMusic()
                     precacheQueueTracks(track)
                 }
 
                 setOnErrorListener { _, what, extra ->
-                    if (mediaPlayer !== this || playbackGeneration != generation || currentUrl != track.url) {
+                    if (mediaPlayer !== this || playbackGeneration != generation || currentUrl != resolvedUrl) {
                         Log.d(
                             TAG,
                             "Ignoring stale onError for generation=$generation currentGeneration=$playbackGeneration what=$what extra=$extra"
@@ -1482,7 +1496,7 @@ class MusicPlayerService : Service() {
                 }
 
                 setOnCompletionListener {
-                    if (mediaPlayer !== this || playbackGeneration != generation || currentUrl != track.url) {
+                    if (mediaPlayer !== this || playbackGeneration != generation || currentUrl != resolvedUrl) {
                         Log.d(
                             TAG,
                             "Ignoring stale onCompletion for generation=$generation currentGeneration=$playbackGeneration track=${track.name}"

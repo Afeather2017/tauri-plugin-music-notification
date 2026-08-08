@@ -59,10 +59,10 @@ class SetServerArgs {
 class QueueSongArgs {
   var id: Long = -1L
   var name: String = ""
-  var path: String = ""
   var deviceId: String? = null
-  var sourceKind: String? = null
-  var url: String = ""
+  var sourceKind: String = ""
+  var localUri: String? = null
+  var tempSongUrl: String? = null
   var lufs: Double? = null
   var coverUrl: String? = null
 }
@@ -343,13 +343,24 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
                 MusicPlayerService.QueueSongInfo(
                     id = it.id,
                     name = it.name,
-                    path = it.path,
                     deviceId = it.deviceId,
                     sourceKind = it.sourceKind,
-                    url = it.url,
+                    localUri = it.localUri,
+                    tempSongUrl = it.tempSongUrl,
                     lufs = it.lufs,
                     coverUrl = it.coverUrl
                 )
+            }
+            val invalidSong = songs.firstOrNull { !it.hasValidLocator() }
+            if (invalidSong != null) {
+                val ret = JSObject()
+                ret.put("success", false)
+                ret.put(
+                    "message",
+                    "Invalid ${invalidSong.sourceKind} queue locator for ${invalidSong.name}"
+                )
+                invoke.resolve(ret)
+                return
             }
             val playMode = args.playMode ?: "sequential"
             val service = MusicPlayerService.instance
@@ -359,8 +370,7 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
                 TAG,
                 "Command setPlayingQueue(): queueSize=${songs.size} currentIndex=${args.queue.currentIndex} " +
                     "serviceAvailable=${service != null} track=${selectedSong?.name} songId=${selectedSong?.id} " +
-                    "deviceId=${selectedSong?.deviceId} sourceKind=${selectedSong?.sourceKind} " +
-                    "hasLegacyUrl=${selectedSong?.url?.isNotBlank()}"
+                    "deviceId=${selectedSong?.deviceId} sourceKind=${selectedSong?.sourceKind}"
             )
 
             if (service != null) {
@@ -403,10 +413,10 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
                 val songObj = JSObject()
                 songObj.put("id", song.id)
                 songObj.put("name", song.name)
-                songObj.put("path", song.path)
                 songObj.put("deviceId", song.deviceId)
                 songObj.put("sourceKind", song.sourceKind)
-                songObj.put("url", song.url)
+                songObj.put("localUri", song.localUri)
+                songObj.put("tempSongUrl", song.tempSongUrl)
                 songObj.put("lufs", song.lufs)
                 songObj.put("coverUrl", song.coverUrl)
                 songs.put(songObj)

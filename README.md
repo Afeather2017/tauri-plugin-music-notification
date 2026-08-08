@@ -206,17 +206,19 @@ await play({
   coverUrl: "https://example.com/song-cover.jpg"
 });
 
-// Queue playback with persisted artwork
+// Identity-based queue playback
 await setPlayingQueue(
   {
     songs: [
       {
         id: 1,
-        name: "Song Title",
-        path: "",
-        url: "https://example.com/song.mp3",
+        name: "Remote Song",
+        deviceId: "stable-device-id",
+        sourceKind: "kaulan",
+        localUri: null,
+        tempSongUrl: null,
         lufs: null,
-        coverUrl: "https://example.com/song-cover.jpg"
+        coverUrl: null
       }
     ],
     currentIndex: 0
@@ -277,8 +279,18 @@ Starts playing music from a URL.
 
 **Behavior notes:**
 - `coverUrl` updates Android media-session metadata and the notification large icon.
-- Queue items can also carry `coverUrl`, so artwork survives `next()`, `previous()`, and restored playback sessions.
+- `play({url})` is ephemeral direct playback and does not survive a process restart.
 - If artwork loading fails, playback continues and the notification falls back to text-only metadata.
+
+### Queue source fields
+
+Queue entries use one source-specific locator:
+
+- `kaulan`: `deviceId + id`; the service queries the current device API URL before creating the media data source.
+- `local_raw`: `localUri`, containing a filesystem, `file://`, or `content://` URI.
+- `temporary`: `tempSongUrl`; these entries remain in the live session but are excluded from restart persistence.
+
+Queue synchronization never changes the resolved URL owned by an active player.
 
 ### `pause()`
 

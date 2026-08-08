@@ -27,12 +27,12 @@ export type PlayMode = 'sequential' | 'shuffle' | 'loop'
 export interface QueueSong {
   id: number;
   name: string;
-  path: string;
   deviceId?: string | null;
-  sourceKind?: 'kaulan' | 'local_raw' | 'temporary' | 'legacy';
-  url?: string;
+  sourceKind: 'kaulan' | 'local_raw' | 'temporary';
   lufs: number | null;
   coverUrl?: string | null;
+  localUri?: string | null;
+  tempSongUrl?: string | null;
 }
 
 export interface PlayingQueue {
