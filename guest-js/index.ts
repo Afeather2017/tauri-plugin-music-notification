@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 export async function ping(value: string): Promise<string | null> {
   return await invoke<{value?: string}>('plugin:music-notification|ping', {
@@ -87,9 +88,13 @@ export async function previous(): Promise<{ success: boolean }> {
   return await invoke<{ success: boolean }>('plugin:music-notification|previous');
 }
 
-export async function seek(position: number): Promise<{ success: boolean }> {
+export async function seek(
+  position: number,
+  options?: { autoPlay?: boolean }
+): Promise<{ success: boolean }> {
   return await invoke<{ success: boolean }>('plugin:music-notification|seek', {
     position,
+    autoPlay: options?.autoPlay ?? false,
   });
 }
 
@@ -97,6 +102,58 @@ export async function seekAndPlay(position: number): Promise<{ success: boolean 
   return await invoke<{ success: boolean }>('plugin:music-notification|seek_and_play', {
     position,
   });
+}
+
+export async function playTrackAtIndex(
+  index: number,
+  autoPlay: boolean = true,
+  startAtMs?: number
+): Promise<{ success: boolean; message?: string }> {
+  return await invoke<{ success: boolean; message?: string }>(
+    'plugin:music-notification|play_track_at_index',
+    {
+      payload: {
+        index,
+        autoPlay,
+        startAtMs: startAtMs ?? null,
+      },
+    }
+  );
+}
+
+export type PlaybackSnapshotReason = 'tick' | 'transition' | 'error'
+
+export type NativePlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
+
+export interface PlaybackSnapshotEvent {
+  reason: PlaybackSnapshotReason;
+  status: NativePlaybackStatus;
+  index: number;
+  songId: number | null;
+  positionMs: number;
+  durationMs: number;
+  positionAtMs: number;
+  playMode: PlayMode;
+  message?: string;
+}
+
+/**
+ * Subscribe to native playback snapshots. The service emits one on every
+ * state transition plus a 250 ms position tick while playing. Resolves to an
+ * unlisten function.
+ */
+export async function onPlaybackEvent(
+  handler: (event: PlaybackSnapshotEvent) => void
+): Promise<() => void> {
+  return await listen<unknown>('playback:event', (event) => {
+    try {
+      const raw =
+        typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload
+      handler(raw as PlaybackSnapshotEvent)
+    } catch (error) {
+      console.warn('[music-notification] dropping malformed playback event', error)
+    }
+  })
 }
 
 export async function getState(): Promise<PlaybackState> {

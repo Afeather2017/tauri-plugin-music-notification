@@ -59,7 +59,14 @@ impl<R: Runtime> MusicNotification<R> {
         Ok(EmptyResponse { success: false })
     }
 
-    pub fn seek(&self, _position: i64) -> crate::Result<EmptyResponse> {
+    pub fn seek(&self, _position: i64, _auto_play: bool) -> crate::Result<EmptyResponse> {
+        Ok(EmptyResponse { success: false })
+    }
+
+    pub fn play_track_at_index(
+        &self,
+        _payload: PlayTrackAtIndexRequest,
+    ) -> crate::Result<EmptyResponse> {
         Ok(EmptyResponse { success: false })
     }
 

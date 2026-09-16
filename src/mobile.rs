@@ -82,13 +82,29 @@ impl<R: Runtime> MusicNotification<R> {
             .map_err(Into::into)
     }
 
-    pub fn seek(&self, position: i64) -> crate::Result<EmptyResponse> {
+    pub fn seek(&self, position: i64, auto_play: bool) -> crate::Result<EmptyResponse> {
         #[derive(serde::Serialize)]
         struct SeekRequest {
             position: i64,
+            auto_play: bool,
         }
         self.0
-            .run_mobile_plugin("seek", SeekRequest { position })
+            .run_mobile_plugin(
+                "seek",
+                SeekRequest {
+                    position,
+                    auto_play,
+                },
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn play_track_at_index(
+        &self,
+        payload: PlayTrackAtIndexRequest,
+    ) -> crate::Result<EmptyResponse> {
+        self.0
+            .run_mobile_plugin("playTrackAtIndex", payload)
             .map_err(Into::into)
     }
 

@@ -49,6 +49,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::previous,
             commands::seek,
             commands::seek_and_play,
+            commands::play_track_at_index,
             commands::get_state,
             commands::set_playing_queue,
             commands::get_playback_session,
@@ -69,6 +70,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             #[cfg(target_os = "android")]
             {
                 models::ensure_android_jni_symbols_linked();
+                models::register_event_emitter(app.clone());
                 if let Some(library_name) = models::get_server_library_name() {
                     music_notification.set_server(library_name)?;
                 }

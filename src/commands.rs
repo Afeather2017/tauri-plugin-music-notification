@@ -54,8 +54,21 @@ pub(crate) async fn previous<R: Runtime>(app: AppHandle<R>) -> Result<EmptyRespo
 }
 
 #[command]
-pub(crate) async fn seek<R: Runtime>(app: AppHandle<R>, position: i64) -> Result<EmptyResponse> {
-    app.music_notification().seek(position)
+pub(crate) async fn seek<R: Runtime>(
+    app: AppHandle<R>,
+    position: i64,
+    auto_play: Option<bool>,
+) -> Result<EmptyResponse> {
+    app.music_notification()
+        .seek(position, auto_play.unwrap_or(false))
+}
+
+#[command]
+pub(crate) async fn play_track_at_index<R: Runtime>(
+    app: AppHandle<R>,
+    payload: PlayTrackAtIndexRequest,
+) -> Result<EmptyResponse> {
+    app.music_notification().play_track_at_index(payload)
 }
 
 #[command]

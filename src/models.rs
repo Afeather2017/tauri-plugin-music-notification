@@ -243,6 +243,30 @@ pub struct SetHeadsetMediaButtonDisabledRequest {
     pub disabled: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayTrackAtIndexRequest {
+    pub index: i32,
+    pub auto_play: bool,
+    pub start_at_ms: Option<i64>,
+}
+
+/// Native playback snapshot pushed from the Kotlin service to JS.
+/// Emitted on every state transition plus a 250 ms position tick while playing.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackSnapshotEvent {
+    pub reason: String,
+    pub status: String,
+    pub index: i32,
+    pub song_id: Option<i64>,
+    pub position_ms: i64,
+    pub duration_ms: i64,
+    pub position_at_ms: i64,
+    pub play_mode: String,
+    pub message: Option<String>,
+}
+
 // Server trait for example apps to implement
 use std::sync::{Arc, Mutex};
 
@@ -335,10 +359,51 @@ pub extern "C" fn Java_com_plugin_music_1notification_MusicPlayerService_serverS
     server_stop()
 }
 
+/// Name of the global Tauri event carrying native playback snapshots to JS.
+pub const PLAYBACK_EVENT_NAME: &str = "playback:event";
+
+type EventEmitFn = Arc<dyn Fn(&str, String) + Send + Sync>;
+
+/// Runtime-erased emitter installed during plugin setup. The Kotlin service
+/// reaches it through the `emitPlaybackEvent` JNI symbol, so playback state
+/// changes flow to JS without any polling.
+static EVENT_EMITTER: Mutex<Option<EventEmitFn>> = Mutex::new(None);
+
+/// Install the app-handle-backed emitter used by the JNI playback event symbol.
+pub fn register_event_emitter<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    let emit_fn: EventEmitFn = Arc::new(move |event: &str, payload: String| {
+        use tauri::Emitter;
+        let _ = handle.emit(event, payload);
+    });
+    *EVENT_EMITTER.lock().unwrap() = Some(emit_fn);
+}
+
+pub fn emit_playback_event(payload: &str) {
+    if let Some(emit_fn) = EVENT_EMITTER.lock().unwrap().as_ref() {
+        emit_fn(PLAYBACK_EVENT_NAME, payload.to_string());
+    }
+}
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn Java_com_plugin_music_1notification_MusicPlayerService_emitPlaybackEvent(
+    mut env: jni::JNIEnv,
+    _this: jni::objects::JObject,
+    payload: jni::objects::JString,
+) -> jni::sys::jboolean {
+    let payload: String = match env.get_string(&payload) {
+        Ok(java_str) => java_str.to_string_lossy().into_owned(),
+        Err(_) => return 0,
+    };
+    emit_playback_event(&payload);
+    1
+}
+
 #[cfg(target_os = "android")]
 pub fn ensure_android_jni_symbols_linked() {
     let _ = Java_com_plugin_music_1notification_MusicPlayerService_serverStart as *const ();
     let _ = Java_com_plugin_music_1notification_MusicPlayerService_serverStop as *const ();
+    let _ = Java_com_plugin_music_1notification_MusicPlayerService_emitPlaybackEvent as *const ();
 }
 
 /// Call stop on the registered server (called from JNI wrapper)

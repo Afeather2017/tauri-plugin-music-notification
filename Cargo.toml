@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-music-notification-api"
-version = "0.2.1"
+version = "0.2.2"
 authors = [ "VMASPAD" ]
 description = "A Tauri plugin for music notifications"
 edition = "2021"
