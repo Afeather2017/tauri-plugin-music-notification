@@ -472,6 +472,11 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
             runtime.put("isPlaying", snapshot.runtime.isPlaying)
             runtime.put("positionMs", snapshot.runtime.positionMs)
             runtime.put("durationMs", snapshot.runtime.durationMs)
+            runtime.put(
+                "status",
+                serviceInstance?.nativeStatus()
+                    ?: if (snapshot.runtime.isPlaying) "playing" else "idle"
+            )
 
             ret.put("queue", queue)
             ret.put("runtime", runtime)

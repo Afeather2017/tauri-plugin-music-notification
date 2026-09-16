@@ -102,6 +102,7 @@ impl<R: Runtime> MusicNotification<R> {
                 is_playing: false,
                 position_ms: 0,
                 duration_ms: 0,
+                status: Some("idle".to_string()),
             },
             play_mode: PlayMode::Sequential,
             current_song_id: None,

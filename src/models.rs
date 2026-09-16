@@ -163,6 +163,10 @@ pub struct PlaybackRuntime {
     pub is_playing: bool,
     pub position_ms: i64,
     pub duration_ms: i64,
+    /// Native transport status (`idle|loading|playing|paused|error`). Absent
+    /// in payloads from older plugin builds; callers fall back to is_playing.
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -388,7 +388,7 @@ class MusicPlayerService : Service() {
     // webview through a global Tauri event. Returns false when unavailable.
     private external fun emitPlaybackEvent(payload: String): Boolean
 
-    private fun nativeStatus(): String = when {
+    fun nativeStatus(): String = when {
         mediaPlayer == null -> "idle"
         !isPrepared -> "loading"
         mediaPlayer?.isPlaying == true -> "playing"

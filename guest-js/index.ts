@@ -45,6 +45,8 @@ export interface PlaybackRuntime {
   isPlaying: boolean;
   positionMs: number;
   durationMs: number;
+  /** Native transport status; older plugin builds omit it. */
+  status?: NativePlaybackStatus;
 }
 
 export interface PlaybackSession {
