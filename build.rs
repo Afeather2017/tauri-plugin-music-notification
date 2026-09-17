@@ -8,6 +8,8 @@ const COMMANDS: &[&str] = &[
     "next",
     "previous",
     "seek",
+    "seek_and_play",
+    "play_track_at_index",
     "get_state",
     "set_playing_queue",
     "get_playback_session",
@@ -16,7 +18,9 @@ const COMMANDS: &[&str] = &[
     "start_service",
     "stop_service",
     "set_volume",
+    "set_normalization_config",
     "set_server",
+    "set_headset_media_button_disabled",
 ];
 
 fn main() {

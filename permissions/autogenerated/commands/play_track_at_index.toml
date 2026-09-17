@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-play-track-at-index"
+description = "Enables the play_track_at_index command without any pre-configured scope."
+commands.allow = ["play_track_at_index"]
+
+[[permission]]
+identifier = "deny-play-track-at-index"
+description = "Denies the play_track_at_index command without any pre-configured scope."
+commands.deny = ["play_track_at_index"]
