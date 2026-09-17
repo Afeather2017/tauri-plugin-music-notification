@@ -84,6 +84,7 @@ impl<R: Runtime> MusicNotification<R> {
 
     pub fn seek(&self, position: i64, auto_play: bool) -> crate::Result<EmptyResponse> {
         #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct SeekRequest {
             position: i64,
             auto_play: bool,

@@ -14,6 +14,7 @@ Default permissions for the plugin
 - `allow-previous`
 - `allow-seek`
 - `allow-seek-and-play`
+- `allow-play-track-at-index`
 - `allow-get-state`
 - `allow-start-service`
 - `allow-stop-service`
