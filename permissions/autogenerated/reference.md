@@ -247,6 +247,32 @@ Denies the play command without any pre-configured scope.
 <tr>
 <td>
 
+`music-notification-api:allow-play-track-at-index`
+
+</td>
+<td>
+
+Enables the play_track_at_index command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`music-notification-api:deny-play-track-at-index`
+
+</td>
+<td>
+
+Denies the play_track_at_index command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `music-notification-api:allow-previous`
 
 </td>

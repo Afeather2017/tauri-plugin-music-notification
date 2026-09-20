@@ -391,6 +391,18 @@
           "markdownDescription": "Denies the play command without any pre-configured scope."
         },
         {
+          "description": "Enables the play_track_at_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-play-track-at-index",
+          "markdownDescription": "Enables the play_track_at_index command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the play_track_at_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-play-track-at-index",
+          "markdownDescription": "Denies the play_track_at_index command without any pre-configured scope."
+        },
+        {
           "description": "Enables the previous command without any pre-configured scope.",
           "type": "string",
           "const": "allow-previous",
