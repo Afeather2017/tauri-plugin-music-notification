@@ -8,10 +8,9 @@ import android.util.Log
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
-import app.tauri.plugin.Channel
-import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import app.tauri.plugin.Invoke
 import org.json.JSONArray
 
 @InvokeArg
@@ -31,6 +30,14 @@ class PlayArgs {
 @InvokeArg
 class SeekArgs {
   var position: Long = 0
+  var autoPlay: Boolean = false
+}
+
+@InvokeArg
+class PlayTrackAtIndexArgs {
+  var index: Int = 0
+  var autoPlay: Boolean = true
+  var startAtMs: Long? = null
 }
 
 @InvokeArg
@@ -90,20 +97,8 @@ class SetHeadsetMediaButtonDisabledArgs {
   var disabled: Boolean = false
 }
 
-@InvokeArg
-class SubscribePlaybackEventsArgs {
-  lateinit var handler: Channel
-}
-
-@InvokeArg
-class UnsubscribePlaybackEventsArgs {
-  var channelId: Long = 0
-}
-
 @TauriPlugin
 class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) {
-
-    private var playbackEventChannel: Channel? = null
 
     companion object {
         private const val TAG = "MusicNotificationPlugin"
@@ -114,89 +109,6 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             return prefs.getString(PREF_SERVER_LIB_NAME, null)
         }
-    }
-
-    init {
-        MusicPlayerService.setPlaybackEventListener { event ->
-            activity.runOnUiThread {
-                val channel = playbackEventChannel
-                if (channel == null) {
-                    Log.d(TAG, "Dropping playback event without subscriber: reason=${event.reason} sequence=${event.sequence}")
-                } else {
-                    Log.d(TAG, "Forwarding playback event: reason=${event.reason} sequence=${event.sequence}")
-                    channel.send(playbackEventToJsObject(event))
-                }
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        playbackEventChannel = null
-        MusicPlayerService.setPlaybackEventListener(null)
-        super.onDestroy()
-    }
-
-    private fun sessionToJsObject(snapshot: MusicPlayerService.SessionSnapshot): JSObject {
-        val songs = JSONArray()
-        snapshot.queue.songs.forEach { song ->
-            songs.put(JSObject().apply {
-                put("id", song.id)
-                put("name", song.name)
-                put("deviceId", song.deviceId)
-                put("sourceKind", song.sourceKind)
-                put("localUri", song.localUri)
-                put("tempSongUrl", song.tempSongUrl)
-                put("lufs", song.lufs)
-                put("coverUrl", song.coverUrl)
-            })
-        }
-
-        return JSObject().apply {
-            put("queue", JSObject().apply {
-                put("songs", songs)
-                put("currentIndex", snapshot.queue.currentIndex)
-            })
-            put("runtime", JSObject().apply {
-                put("isPlaying", snapshot.runtime.isPlaying)
-                put("positionMs", snapshot.runtime.positionMs)
-                put("durationMs", snapshot.runtime.durationMs)
-            })
-            put("playMode", snapshot.playMode)
-            put("currentSongId", snapshot.currentSongId)
-        }
-    }
-
-    private fun playbackEventToJsObject(event: MusicPlayerService.PlaybackEvent): JSObject {
-        return JSObject().apply {
-            put("protocolVersion", event.protocolVersion)
-            put("serviceGeneration", event.serviceGeneration)
-            put("sequence", event.sequence)
-            put("revision", event.revision)
-            put("reason", event.reason)
-            put("session", sessionToJsObject(event.session))
-        }
-    }
-
-    @Command
-    fun subscribePlaybackEvents(invoke: Invoke) {
-        val args = invoke.parseArgs(SubscribePlaybackEventsArgs::class.java)
-        playbackEventChannel = args.handler
-        Log.i(TAG, "Playback event channel subscribed: channelId=${args.handler.id}")
-        val ret = JSObject()
-        ret.put("success", true)
-        invoke.resolve(ret)
-    }
-
-    @Command
-    fun unsubscribePlaybackEvents(invoke: Invoke) {
-        val args = invoke.parseArgs(UnsubscribePlaybackEventsArgs::class.java)
-        if (playbackEventChannel?.id == args.channelId) {
-            playbackEventChannel = null
-            Log.i(TAG, "Playback event channel unsubscribed: channelId=${args.channelId}")
-        }
-        val ret = JSObject()
-        ret.put("success", true)
-        invoke.resolve(ret)
     }
 
     @Command
@@ -365,10 +277,11 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
     fun seek(invoke: Invoke) {
         try {
             val args = invoke.parseArgs(SeekArgs::class.java)
-            Log.d(TAG, "Command seek(): dispatching ACTION_SEEK to position=${args.position}")
+            Log.d(TAG, "Command seek(): dispatching ACTION_SEEK to position=${args.position} autoPlay=${args.autoPlay}")
             val serviceIntent = Intent(activity, MusicPlayerService::class.java).apply {
                 action = MusicPlayerService.ACTION_SEEK
                 putExtra(MusicPlayerService.EXTRA_POSITION, args.position)
+                putExtra(MusicPlayerService.EXTRA_AUTO_PLAY, args.autoPlay)
             }
             activity.startService(serviceIntent)
 
@@ -378,6 +291,41 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
         } catch (e: Exception) {
             val ret = JSObject()
             ret.put("success", false)
+            invoke.resolve(ret)
+        }
+    }
+
+    @Command
+    fun playTrackAtIndex(invoke: Invoke) {
+        try {
+            val args = invoke.parseArgs(PlayTrackAtIndexArgs::class.java)
+            Log.d(
+                TAG,
+                "Command playTrackAtIndex(): index=${args.index} autoPlay=${args.autoPlay} startAtMs=${args.startAtMs}"
+            )
+            val serviceIntent = Intent(activity, MusicPlayerService::class.java).apply {
+                action = MusicPlayerService.ACTION_PLAY_TRACK_AT_INDEX
+                putExtra(MusicPlayerService.EXTRA_INDEX, args.index)
+                putExtra(MusicPlayerService.EXTRA_AUTO_PLAY, args.autoPlay)
+                if (args.startAtMs != null) {
+                    putExtra(MusicPlayerService.EXTRA_START_AT_MS, args.startAtMs)
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                activity.startForegroundService(serviceIntent)
+            } else {
+                activity.startService(serviceIntent)
+            }
+
+            val ret = JSObject()
+            ret.put("success", true)
+            invoke.resolve(ret)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to play track at index", e)
+            val ret = JSObject()
+            ret.put("success", false)
+            ret.put("message", e.message)
             invoke.resolve(ret)
         }
     }
@@ -466,8 +414,7 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
                 TAG,
                 "Command setPlayingQueue(): queueSize=${songs.size} currentIndex=${args.queue.currentIndex} " +
                     "serviceAvailable=${service != null} track=${selectedSong?.name} songId=${selectedSong?.id} " +
-                    "deviceId=${selectedSong?.deviceId} sourceKind=${selectedSong?.sourceKind} " +
-                    "coverUrl=${selectedSong?.coverUrl}"
+                    "deviceId=${selectedSong?.deviceId} sourceKind=${selectedSong?.sourceKind}"
             )
 
             if (service != null) {
@@ -503,12 +450,38 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
             val snapshot = serviceInstance?.getPlaybackSession()
                 ?: MusicPlayerService.loadPersistedSessionSnapshot(activity)
 
-            val ret = sessionToJsObject(snapshot)
-            serviceInstance?.let {
-                ret.put("serviceGeneration", it.getServiceGeneration())
-                ret.put("sequence", it.getEventSequence())
-                ret.put("revision", it.getSessionRevision())
+            val ret = JSObject()
+            val queue = JSObject()
+            val songs = JSONArray()
+            snapshot.queue.songs.forEach { song ->
+                val songObj = JSObject()
+                songObj.put("id", song.id)
+                songObj.put("name", song.name)
+                songObj.put("deviceId", song.deviceId)
+                songObj.put("sourceKind", song.sourceKind)
+                songObj.put("localUri", song.localUri)
+                songObj.put("tempSongUrl", song.tempSongUrl)
+                songObj.put("lufs", song.lufs)
+                songObj.put("coverUrl", song.coverUrl)
+                songs.put(songObj)
             }
+            queue.put("songs", songs)
+            queue.put("currentIndex", snapshot.queue.currentIndex)
+
+            val runtime = JSObject()
+            runtime.put("isPlaying", snapshot.runtime.isPlaying)
+            runtime.put("positionMs", snapshot.runtime.positionMs)
+            runtime.put("durationMs", snapshot.runtime.durationMs)
+            runtime.put(
+                "status",
+                serviceInstance?.nativeStatus()
+                    ?: if (snapshot.runtime.isPlaying) "playing" else "idle"
+            )
+
+            ret.put("queue", queue)
+            ret.put("runtime", runtime)
+            ret.put("playMode", snapshot.playMode)
+            ret.put("currentSongId", snapshot.currentSongId)
             invoke.resolve(ret)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get playback session", e)

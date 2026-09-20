@@ -1,5 +1,5 @@
 use serde::de::DeserializeOwned;
-use tauri::{ipc::Channel, plugin::PluginApi, AppHandle, Runtime};
+use tauri::{plugin::PluginApi, AppHandle, Runtime};
 
 use crate::models::*;
 
@@ -59,7 +59,14 @@ impl<R: Runtime> MusicNotification<R> {
         Ok(EmptyResponse { success: false })
     }
 
-    pub fn seek(&self, _position: i64) -> crate::Result<EmptyResponse> {
+    pub fn seek(&self, _position: i64, _auto_play: bool) -> crate::Result<EmptyResponse> {
+        Ok(EmptyResponse { success: false })
+    }
+
+    pub fn play_track_at_index(
+        &self,
+        _payload: PlayTrackAtIndexRequest,
+    ) -> crate::Result<EmptyResponse> {
         Ok(EmptyResponse { success: false })
     }
 
@@ -95,24 +102,11 @@ impl<R: Runtime> MusicNotification<R> {
                 is_playing: false,
                 position_ms: 0,
                 duration_ms: 0,
+                status: Some("idle".to_string()),
             },
             play_mode: PlayMode::Sequential,
             current_song_id: None,
-            service_generation: None,
-            sequence: None,
-            revision: None,
         })
-    }
-
-    pub fn subscribe_playback_events(
-        &self,
-        _handler: Channel<PlaybackEvent>,
-    ) -> crate::Result<EmptyResponse> {
-        Ok(EmptyResponse { success: false })
-    }
-
-    pub fn unsubscribe_playback_events(&self, _channel_id: u32) -> crate::Result<EmptyResponse> {
-        Ok(EmptyResponse { success: false })
     }
 
     pub fn clear_playing_queue(&self) -> crate::Result<QueueMutationResponse> {

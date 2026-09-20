@@ -1,6 +1,5 @@
 use serde::de::DeserializeOwned;
 use tauri::{
-    ipc::Channel,
     plugin::{PluginApi, PluginHandle},
     AppHandle, Runtime,
 };
@@ -83,13 +82,30 @@ impl<R: Runtime> MusicNotification<R> {
             .map_err(Into::into)
     }
 
-    pub fn seek(&self, position: i64) -> crate::Result<EmptyResponse> {
+    pub fn seek(&self, position: i64, auto_play: bool) -> crate::Result<EmptyResponse> {
         #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct SeekRequest {
             position: i64,
+            auto_play: bool,
         }
         self.0
-            .run_mobile_plugin("seek", SeekRequest { position })
+            .run_mobile_plugin(
+                "seek",
+                SeekRequest {
+                    position,
+                    auto_play,
+                },
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn play_track_at_index(
+        &self,
+        payload: PlayTrackAtIndexRequest,
+    ) -> crate::Result<EmptyResponse> {
+        self.0
+            .run_mobile_plugin("playTrackAtIndex", payload)
             .map_err(Into::into)
     }
 
@@ -121,38 +137,6 @@ impl<R: Runtime> MusicNotification<R> {
     pub fn get_playback_session(&self) -> crate::Result<PlaybackSession> {
         self.0
             .run_mobile_plugin("getPlaybackSession", EmptyRequest {})
-            .map_err(Into::into)
-    }
-
-    pub fn subscribe_playback_events(
-        &self,
-        handler: Channel<PlaybackEvent>,
-    ) -> crate::Result<EmptyResponse> {
-        #[derive(serde::Serialize)]
-        struct SubscribePlaybackEventsRequest {
-            handler: Channel<PlaybackEvent>,
-        }
-
-        self.0
-            .run_mobile_plugin(
-                "subscribePlaybackEvents",
-                SubscribePlaybackEventsRequest { handler },
-            )
-            .map_err(Into::into)
-    }
-
-    pub fn unsubscribe_playback_events(&self, channel_id: u32) -> crate::Result<EmptyResponse> {
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct UnsubscribePlaybackEventsRequest {
-            channel_id: u32,
-        }
-
-        self.0
-            .run_mobile_plugin(
-                "unsubscribePlaybackEvents",
-                UnsubscribePlaybackEventsRequest { channel_id },
-            )
             .map_err(Into::into)
     }
 

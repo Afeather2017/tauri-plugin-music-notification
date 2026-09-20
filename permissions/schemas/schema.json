@@ -547,34 +547,10 @@
           "markdownDescription": "Denies the stop_service command without any pre-configured scope."
         },
         {
-          "description": "Enables the subscribe_playback_events command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-subscribe-playback-events",
-          "markdownDescription": "Enables the subscribe_playback_events command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the subscribe_playback_events command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-subscribe-playback-events",
-          "markdownDescription": "Denies the subscribe_playback_events command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the unsubscribe_playback_events command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-unsubscribe-playback-events",
-          "markdownDescription": "Enables the unsubscribe_playback_events command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the unsubscribe_playback_events command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-unsubscribe-playback-events",
-          "markdownDescription": "Denies the unsubscribe_playback_events command without any pre-configured scope."
-        },
-        {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-play`\n- `allow-pause`\n- `allow-pause-after`\n- `allow-resume`\n- `allow-stop`\n- `allow-next`\n- `allow-previous`\n- `allow-seek`\n- `allow-seek-and-play`\n- `allow-get-state`\n- `allow-start-service`\n- `allow-stop-service`\n- `allow-set-volume`\n- `allow-set-normalization-config`\n- `allow-set-server`\n- `allow-set-playing-queue`\n- `allow-get-playback-session`\n- `allow-subscribe-playback-events`\n- `allow-unsubscribe-playback-events`\n- `allow-clear-playing-queue`\n- `allow-set-play-mode`\n- `allow-set-headset-media-button-disabled`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-play`\n- `allow-pause`\n- `allow-pause-after`\n- `allow-resume`\n- `allow-stop`\n- `allow-next`\n- `allow-previous`\n- `allow-seek`\n- `allow-seek-and-play`\n- `allow-play-track-at-index`\n- `allow-get-state`\n- `allow-start-service`\n- `allow-stop-service`\n- `allow-set-volume`\n- `allow-set-normalization-config`\n- `allow-set-server`\n- `allow-set-playing-queue`\n- `allow-get-playback-session`\n- `allow-clear-playing-queue`\n- `allow-set-play-mode`\n- `allow-set-headset-media-button-disabled`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-play`\n- `allow-pause`\n- `allow-pause-after`\n- `allow-resume`\n- `allow-stop`\n- `allow-next`\n- `allow-previous`\n- `allow-seek`\n- `allow-seek-and-play`\n- `allow-get-state`\n- `allow-start-service`\n- `allow-stop-service`\n- `allow-set-volume`\n- `allow-set-normalization-config`\n- `allow-set-server`\n- `allow-set-playing-queue`\n- `allow-get-playback-session`\n- `allow-subscribe-playback-events`\n- `allow-unsubscribe-playback-events`\n- `allow-clear-playing-queue`\n- `allow-set-play-mode`\n- `allow-set-headset-media-button-disabled`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-play`\n- `allow-pause`\n- `allow-pause-after`\n- `allow-resume`\n- `allow-stop`\n- `allow-next`\n- `allow-previous`\n- `allow-seek`\n- `allow-seek-and-play`\n- `allow-play-track-at-index`\n- `allow-get-state`\n- `allow-start-service`\n- `allow-stop-service`\n- `allow-set-volume`\n- `allow-set-normalization-config`\n- `allow-set-server`\n- `allow-set-playing-queue`\n- `allow-get-playback-session`\n- `allow-clear-playing-queue`\n- `allow-set-play-mode`\n- `allow-set-headset-media-button-disabled`"
         }
       ]
     }

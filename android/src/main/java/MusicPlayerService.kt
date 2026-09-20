@@ -31,7 +31,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Collections
-import java.util.UUID
 
 class MusicPlayerService : Service() {
 
@@ -59,6 +58,7 @@ class MusicPlayerService : Service() {
         const val ACTION_PREVIOUS = "com.plugin.music_notification.PREVIOUS"
         const val ACTION_SEEK = "com.plugin.music_notification.SEEK"
         const val ACTION_SEEK_AND_PLAY = "com.plugin.music_notification.SEEK_AND_PLAY"
+        const val ACTION_PLAY_TRACK_AT_INDEX = "com.plugin.music_notification.PLAY_TRACK_AT_INDEX"
         const val ACTION_START_SERVICE = "com.plugin.music_notification.START_SERVICE"
         const val ACTION_STOP_SERVICE = "com.plugin.music_notification.STOP_SERVICE"
         const val ACTION_SET_VOLUME = "com.plugin.music_notification.SET_VOLUME"
@@ -70,6 +70,9 @@ class MusicPlayerService : Service() {
         const val EXTRA_ALBUM = "album"
         const val EXTRA_COVER_URL = "coverUrl"
         const val EXTRA_POSITION = "position"
+        const val EXTRA_AUTO_PLAY = "autoPlay"
+        const val EXTRA_INDEX = "index"
+        const val EXTRA_START_AT_MS = "startAtMs"
         const val EXTRA_DELAY_MS = "delayMs"
         const val EXTRA_VOLUME = "volume"
         const val EXTRA_NORMALIZATION_MODE = "normalizationMode"
@@ -78,13 +81,6 @@ class MusicPlayerService : Service() {
         const val EXTRA_LUFS_PRECACHE_COUNT = "lufsPrecacheCount"
 
         var instance: MusicPlayerService? = null
-
-        @Volatile
-        private var playbackEventListener: ((PlaybackEvent) -> Unit)? = null
-
-        fun setPlaybackEventListener(listener: ((PlaybackEvent) -> Unit)?) {
-            playbackEventListener = listener
-        }
 
         fun loadServerLibrary(context: Context): String? {
             val libName = MusicNotificationPlugin.getServerLibName(context)
@@ -225,24 +221,6 @@ class MusicPlayerService : Service() {
             return maxOf(0L, deadlineMs - nowMs)
         }
 
-        fun normalizeOptionalString(value: String?): String? {
-            return value
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
-        }
-
-        fun resolveLocalRawCoverUrl(songId: Long, coverUrl: String?): String? {
-            val explicitCoverUrl = normalizeOptionalString(coverUrl)
-            if (explicitCoverUrl != null) {
-                return explicitCoverUrl
-            }
-            return if (songId > 0L) {
-                "http://localhost:2080/api/music/id/$songId/cover"
-            } else {
-                null
-            }
-        }
-
         private fun parseSessionJson(json: JSONObject): SessionSnapshot {
             val queueJson = json.optJSONObject("queue") ?: JSONObject()
             val songsJson = queueJson.optJSONArray("songs") ?: JSONArray()
@@ -252,12 +230,12 @@ class MusicPlayerService : Service() {
                 val song = QueueSongInfo(
                     id = songJson.optLong("id", -1L),
                     name = songJson.optString("name", ""),
-                    deviceId = if (songJson.isNull("deviceId")) null else normalizeOptionalString(songJson.optString("deviceId", "")),
+                    deviceId = songJson.optString("deviceId", "").ifBlank { null },
                     sourceKind = songJson.optString("sourceKind", ""),
-                    localUri = if (songJson.isNull("localUri")) null else normalizeOptionalString(songJson.optString("localUri", "")),
-                    tempSongUrl = if (songJson.isNull("tempSongUrl")) null else normalizeOptionalString(songJson.optString("tempSongUrl", "")),
+                    localUri = songJson.optString("localUri", "").ifBlank { null },
+                    tempSongUrl = songJson.optString("tempSongUrl", "").ifBlank { null },
                     lufs = if (songJson.has("lufs") && !songJson.isNull("lufs")) songJson.optDouble("lufs") else null,
-                    coverUrl = if (songJson.isNull("coverUrl")) null else normalizeOptionalString(songJson.optString("coverUrl", ""))
+                    coverUrl = songJson.optString("coverUrl", "").ifBlank { null }
                 )
                 if (song.hasValidLocator()) {
                     songs.add(song)
@@ -397,15 +375,6 @@ class MusicPlayerService : Service() {
         val currentSongId: Long?
     )
 
-    data class PlaybackEvent(
-        val protocolVersion: Int = 1,
-        val serviceGeneration: String,
-        val sequence: Long,
-        val revision: Long,
-        val reason: String,
-        val session: SessionSnapshot
-    )
-
     data class PrecacheLufsResult(
         val success: Boolean,
         val lufs: Double?,
@@ -415,14 +384,48 @@ class MusicPlayerService : Service() {
     private external fun serverStart(): Int
     private external fun serverStop(): Int
 
+    // Implemented in the plugin's Rust cdylib; forwards the snapshot JSON to the
+    // webview through a global Tauri event. Returns false when unavailable.
+    private external fun emitPlaybackEvent(payload: String): Boolean
+
+    fun nativeStatus(): String = when {
+        mediaPlayer == null -> "idle"
+        !isPrepared -> "loading"
+        mediaPlayer?.isPlaying == true -> "playing"
+        else -> "paused"
+    }
+
+    /**
+     * Push a playback snapshot to JS. Emitted on every state transition plus a
+     * 250 ms position tick while playing, replacing the old 1 s webview poll.
+     */
+    private fun emitPlaybackSnapshot(reason: String, message: String? = null) {
+        try {
+            val runtime = buildRuntimeSnapshot()
+            val json = JSONObject()
+            json.put("type", "snapshot")
+            json.put("reason", reason)
+            json.put("status", nativeStatus())
+            json.put("index", if (currentTrackIndex in tracks.indices) currentTrackIndex else -1)
+            json.put("songId", tracks.getOrNull(currentTrackIndex)?.id ?: JSONObject.NULL)
+            json.put("positionMs", runtime.positionMs)
+            json.put("durationMs", runtime.durationMs)
+            json.put("positionAtMs", System.currentTimeMillis())
+            json.put("playMode", playMode)
+            if (message != null) json.put("message", message)
+            emitPlaybackEvent(json.toString())
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "emitPlaybackEvent unavailable (server library not loaded)", e)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to emit playback snapshot", e)
+        }
+    }
+
     private var httpServerRunning = false
     private var musicPlayerActive = false
     private var tracks = mutableListOf<QueueSongInfo>()
     private var currentTrackIndex = -1
     private var playMode = "sequential"
-    private val serviceGeneration = UUID.randomUUID().toString()
-    private var eventSequence = 0L
-    private var sessionRevision = 0L
 
     private var mediaPlayer: MediaPlayer? = null
     private var isPrepared = false
@@ -433,26 +436,6 @@ class MusicPlayerService : Service() {
     fun hasMediaPlayer(): Boolean = mediaPlayer != null
 
     fun queueSize(): Int = tracks.size
-
-    fun getServiceGeneration(): String = serviceGeneration
-
-    fun getEventSequence(): Long = eventSequence
-
-    fun getSessionRevision(): Long = sessionRevision
-
-    private fun publishPlaybackEvent(reason: String) {
-        sessionRevision += 1
-        eventSequence += 1
-        playbackEventListener?.invoke(
-            PlaybackEvent(
-                serviceGeneration = serviceGeneration,
-                sequence = eventSequence,
-                revision = sessionRevision,
-                reason = reason,
-                session = buildSessionSnapshot()
-            )
-        )
-    }
 
     /** Start playing the current track from the restored queue */
     fun playCurrentTrack() {
@@ -466,6 +449,7 @@ class MusicPlayerService : Service() {
             "Playback resolution path entered: index=$currentTrackIndex track=${track.name} " +
                 "songId=${track.id} deviceId=${track.deviceId} sourceKind=${track.sourceKind}"
         )
+        pendingResumeAfterPrepare = true
         playQueueTrackAt(currentTrackIndex, 1, tracks.size)
     }
 
@@ -514,10 +498,7 @@ class MusicPlayerService : Service() {
                 )
             }
             "local_raw" -> track.localUri?.takeIf { it.isNotBlank() }?.let {
-                PlaybackTarget(
-                    audioUrl = it,
-                    coverUrl = resolveLocalRawCoverUrl(track.id, track.coverUrl)
-                )
+                PlaybackTarget(audioUrl = it, coverUrl = track.coverUrl)
             }
             "temporary" -> track.tempSongUrl?.takeIf { it.isNotBlank() }?.let {
                 PlaybackTarget(audioUrl = it, coverUrl = track.coverUrl)
@@ -558,41 +539,76 @@ class MusicPlayerService : Service() {
         }.start()
     }
 
-    fun seekAndPlay(positionMs: Long) {
+    /**
+     * Seek the current track. Seeking never starts playback on its own; pass
+     * autoPlay=true to resume a paused/unloaded track after the seek lands.
+     */
+    fun seekTo(positionMs: Long, autoPlay: Boolean) {
         val normalizedPosition = positionMs.coerceAtLeast(0L)
-        pendingSeekPositionMs = normalizedPosition
+        val player = mediaPlayer
         Log.d(
             TAG,
-            "seekAndPlay: positionMs=$normalizedPosition mediaPlayer=${mediaPlayer != null} isPrepared=$isPrepared currentTrackIndex=$currentTrackIndex queueSize=${tracks.size}"
+            "seekTo: positionMs=$normalizedPosition autoPlay=$autoPlay mediaPlayer=${player != null} " +
+                "isPrepared=$isPrepared currentTrackIndex=$currentTrackIndex queueSize=${tracks.size}"
         )
-
-        val player = mediaPlayer
-        if (player != null && isPrepared) {
-            val track = tracks.getOrNull(currentTrackIndex)
-            Log.w(
-                TAG,
-                "seekAndPlay: resuming prepared player without resolution query " +
-                    "track=${track?.name} songId=${track?.id} deviceId=${track?.deviceId} " +
-                    "sourceKind=${track?.sourceKind} currentUrl=$currentUrl"
-            )
-            val clampedPosition = normalizedPosition.coerceAtMost(player.duration.toLong()).toInt()
-            player.seekTo(clampedPosition)
-            pendingSeekPositionMs = null
-            resumeMusic()
-            persistSession(isPlayingOverride = true)
-            updatePlaybackState()
-            return
-        }
-
-        if (currentTrackIndex in tracks.indices) {
-            if (player == null) {
-                playCurrentTrack()
+        if (player != null) {
+            if (isPrepared) {
+                val clampedPosition = normalizedPosition.coerceAtMost(player.duration.toLong()).toInt()
+                player.seekTo(clampedPosition)
+                pendingSeekPositionMs = null
+                if (autoPlay && !player.isPlaying) {
+                    resumeMusic()
+                } else {
+                    persistSession(isPlayingOverride = player.isPlaying)
+                    updatePlaybackState()
+                    updateNotification()
+                    emitPlaybackSnapshot("transition")
+                }
+            } else {
+                // Still preparing: park the target so onPrepared applies it.
+                pendingSeekPositionMs = normalizedPosition
             }
             return
         }
 
-        Log.w(TAG, "seekAndPlay: no active track available for resume")
-        pendingSeekPositionMs = null
+        pendingSeekPositionMs = normalizedPosition
+        if (autoPlay && currentTrackIndex in tracks.indices) {
+            playCurrentTrack()
+            return
+        }
+        persistSession(isPlayingOverride = false)
+        updatePlaybackState()
+        emitPlaybackSnapshot("transition")
+    }
+
+    fun seekAndPlay(positionMs: Long) {
+        seekTo(positionMs, autoPlay = true)
+    }
+
+    /**
+     * Switch to an existing queue index without re-pushing the queue.
+     * Resolves the track URL and prepares it; starts playing when autoPlay,
+     * otherwise leaves it prepared and paused.
+     */
+    fun playTrackAtIndex(index: Int, autoPlay: Boolean, startAtMs: Long?) {
+        if (index !in tracks.indices) {
+            Log.w(TAG, "playTrackAtIndex: index $index out of bounds queueSize=${tracks.size}")
+            return
+        }
+        Log.i(
+            TAG,
+            "playTrackAtIndex: index=$index autoPlay=$autoPlay startAtMs=$startAtMs " +
+                "track=${tracks[index].name} songId=${tracks[index].id}"
+        )
+        pendingResumeAfterPrepare = autoPlay
+        if (startAtMs != null && startAtMs > 0L) {
+            pendingSeekPositionMs = startAtMs.coerceAtLeast(0L)
+        } else if (!autoPlay) {
+            pendingSeekPositionMs = null
+        }
+        currentTrackIndex = index
+        emitPlaybackSnapshot("transition")
+        playQueueTrackAt(index, 1, tracks.size)
     }
 
     fun stopFromNotification() {
@@ -616,6 +632,12 @@ class MusicPlayerService : Service() {
     private var prepareStartTime = 0L
     private var playTrackCallStartTime = 0L
     private var pendingSeekPositionMs: Long? = null
+    // Whether the next onPrepared should start playback or leave the track paused.
+    private var pendingResumeAfterPrepare = true
+    private var progressTickCounter = 0L
+    // Last known runtime for the no-player case, so snapshots after a stop or
+    // restore don't need to hit SharedPreferences on every 250 ms tick.
+    private var cachedRuntime = PlaybackRuntimeSnapshot(false, 0L, 0L)
     private var pauseAfterDeadlineMs = 0L
     private var currentArtworkBitmap: Bitmap? = null
     private var artworkGeneration = 0L
@@ -702,9 +724,7 @@ class MusicPlayerService : Service() {
 
             override fun onSeekTo(pos: Long) {
                 Log.d(TAG, "MediaSession callback: onSeekTo $pos")
-                mediaPlayer?.seekTo(pos.toInt())
-                persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
-                updatePlaybackState()
+                seekTo(pos, autoPlay = false)
             }
         })
 
@@ -714,10 +734,14 @@ class MusicPlayerService : Service() {
             override fun run() {
                 mediaPlayer?.let {
                     if (it.isPlaying) {
-                        persistSession(isPlayingOverride = true)
-                        updatePlaybackState()
-                        updateNotification()
-                        handler.postDelayed(this, 1000)
+                        progressTickCounter += 1
+                        emitPlaybackSnapshot("tick")
+                        if (progressTickCounter % 4L == 0L) {
+                            persistSession(isPlayingOverride = true)
+                            updatePlaybackState()
+                            updateNotification()
+                        }
+                        handler.postDelayed(this, 250)
                     }
                 }
             }
@@ -809,15 +833,25 @@ class MusicPlayerService : Service() {
                 }
                 ACTION_SEEK -> {
                     val position = it.getLongExtra(EXTRA_POSITION, 0)
-                    Log.d(TAG, "onStartCommand#${startCommandCount}: ACTION_SEEK to $position")
-                    mediaPlayer?.seekTo(position.toInt())
-                    persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
-                    updatePlaybackState()
+                    val autoPlay = it.getBooleanExtra(EXTRA_AUTO_PLAY, false)
+                    Log.d(TAG, "onStartCommand#${startCommandCount}: ACTION_SEEK to $position autoPlay=$autoPlay")
+                    seekTo(position, autoPlay)
                 }
                 ACTION_SEEK_AND_PLAY -> {
                     val position = it.getLongExtra(EXTRA_POSITION, 0)
                     Log.d(TAG, "onStartCommand#${startCommandCount}: ACTION_SEEK_AND_PLAY to $position")
-                    seekAndPlay(position)
+                    seekTo(position, autoPlay = true)
+                }
+                ACTION_PLAY_TRACK_AT_INDEX -> {
+                    val index = it.getIntExtra(EXTRA_INDEX, -1)
+                    val autoPlay = it.getBooleanExtra(EXTRA_AUTO_PLAY, true)
+                    val startAtMs =
+                        if (it.hasExtra(EXTRA_START_AT_MS)) it.getLongExtra(EXTRA_START_AT_MS, 0L) else null
+                    Log.d(
+                        TAG,
+                        "onStartCommand#${startCommandCount}: ACTION_PLAY_TRACK_AT_INDEX index=$index autoPlay=$autoPlay startAtMs=$startAtMs"
+                    )
+                    playTrackAtIndex(index, autoPlay, startAtMs)
                 }
                 ACTION_SET_VOLUME -> {
                     val volume = it.getFloatExtra(EXTRA_VOLUME, 1.0f)
@@ -882,13 +916,13 @@ class MusicPlayerService : Service() {
         )
         persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
         updateNotification()
-        publishPlaybackEvent("queue_changed")
+        emitPlaybackSnapshot("transition")
     }
 
     fun setPlayMode(newPlayMode: String) {
         playMode = normalizePlayMode(newPlayMode)
         persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
-        publishPlaybackEvent("play_mode_changed")
+        emitPlaybackSnapshot("transition")
     }
 
     fun clearPlayingQueue() {
@@ -927,6 +961,7 @@ class MusicPlayerService : Service() {
                 "deviceId=${restoredTrack?.deviceId} sourceKind=${restoredTrack?.sourceKind}"
         )
         musicPlayerActive = snapshot.runtime.isPlaying
+        cachedRuntime = snapshot.runtime
 
         // Set media session metadata so notification shows the restored track info
         if (currentTrackIndex in tracks.indices) {
@@ -969,7 +1004,7 @@ class MusicPlayerService : Service() {
     }
 
     private fun buildRuntimeSnapshot(): PlaybackRuntimeSnapshot {
-        mediaPlayer?.takeIf { isPrepared }?.let { player ->
+        mediaPlayer?.let { player ->
             return PlaybackRuntimeSnapshot(
                 isPlaying = player.isPlaying,
                 positionMs = player.currentPosition.toLong(),
@@ -977,16 +1012,11 @@ class MusicPlayerService : Service() {
             )
         }
 
-        val persisted = loadPersistedSessionSnapshot(this)
-        return PlaybackRuntimeSnapshot(
-            isPlaying = false,
-            positionMs = persisted.runtime.positionMs,
-            durationMs = persisted.runtime.durationMs
-        )
+        return cachedRuntime
     }
 
     private fun persistSession(isPlayingOverride: Boolean? = null) {
-        val runtime = mediaPlayer?.takeIf { isPrepared }?.let { player ->
+        val runtime = mediaPlayer?.let { player ->
             PlaybackRuntimeSnapshot(
                 isPlaying = isPlayingOverride ?: player.isPlaying,
                 positionMs = player.currentPosition.toLong(),
@@ -997,6 +1027,7 @@ class MusicPlayerService : Service() {
             positionMs = 0L,
             durationMs = 0L
         )
+        cachedRuntime = runtime
 
         savePersistedSessionSnapshot(
             this,
@@ -1034,6 +1065,7 @@ class MusicPlayerService : Service() {
         tracks = mutableListOf(fallbackTrack)
         currentTrackIndex = 0
         playMode = "sequential"
+        pendingResumeAfterPrepare = true
         playTrack(fallbackTrack, PlaybackTarget(url, coverUrl), artist, album)
     }
 
@@ -1128,7 +1160,6 @@ class MusicPlayerService : Service() {
             if (queueIndex == currentTrackIndex) {
                 persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
             }
-            publishPlaybackEvent("queue_changed")
         }
         return updatedTrack
     }
@@ -1345,13 +1376,11 @@ class MusicPlayerService : Service() {
     ) {
         val coverUrl = coverUrlOverride?.trim()
         if (coverUrl.isNullOrEmpty()) {
-            Log.i(TAG, "No artwork target for track=${track.name} songId=${track.id} sourceKind=${track.sourceKind}")
             currentArtworkBitmap = null
             applyTrackMetadata(track, artist, album, durationMs, null)
             return
         }
 
-        Log.i(TAG, "Loading artwork for track=${track.name} coverUrl=$coverUrl")
         val generation = artworkGeneration
         Thread {
             val artwork = try {
@@ -1466,8 +1495,17 @@ class MusicPlayerService : Service() {
                 mediaPlayer?.seekTo(clampedPosition)
                 pendingSeekPositionMs = null
             }
-            Log.d(TAG, "Same URL already prepared, resuming")
-            resumeMusic()
+            if (pendingResumeAfterPrepare) {
+                Log.d(TAG, "Same URL already prepared, resuming")
+                resumeMusic()
+            } else {
+                Log.d(TAG, "Same URL already prepared, staying paused per playWhenReady=false")
+                pendingResumeAfterPrepare = true
+                persistSession(isPlayingOverride = false)
+                updatePlaybackState()
+                updateNotification()
+                emitPlaybackSnapshot("transition")
+            }
             return
         }
 
@@ -1496,7 +1534,7 @@ class MusicPlayerService : Service() {
         playbackGeneration += 1
         val generation = playbackGeneration
         persistSession(isPlayingOverride = false)
-        publishPlaybackEvent("track_changed")
+        emitPlaybackSnapshot("transition")
 
         mediaPlayer = MediaPlayer().apply {
             try {
@@ -1544,18 +1582,16 @@ class MusicPlayerService : Service() {
                     applyTrackMetadata(track, artist, album, mp.duration.toLong(), null)
                     loadArtworkForTrackAsync(track, artist, album, mp.duration.toLong(), target.coverUrl, resolvedUrl)
                     persistSession(isPlayingOverride = false)
-                    publishPlaybackEvent("prepared")
-                    resumeMusic()
-                    precacheQueueTracks(track)
-                }
-
-                setOnSeekCompleteListener { mp ->
-                    if (mediaPlayer !== mp || playbackGeneration != generation || currentUrl != resolvedUrl) {
-                        return@setOnSeekCompleteListener
+                    if (pendingResumeAfterPrepare) {
+                        resumeMusic()
+                    } else {
+                        Log.d(TAG, "onPrepared: holding paused per playWhenReady=false track=${track.name}")
+                        pendingResumeAfterPrepare = true
+                        updatePlaybackState()
+                        updateNotification()
+                        emitPlaybackSnapshot("transition")
                     }
-                    persistSession(isPlayingOverride = mp.isPlaying)
-                    updatePlaybackState()
-                    publishPlaybackEvent("seeked")
+                    precacheQueueTracks(track)
                 }
 
                 setOnErrorListener { _, what, extra ->
@@ -1569,7 +1605,7 @@ class MusicPlayerService : Service() {
                     Log.e(TAG, "MediaPlayer error - what: $what, extra: $extra")
                     isPrepared = false
                     persistSession(isPlayingOverride = false)
-                    publishPlaybackEvent("error")
+                    emitPlaybackSnapshot("error", "media_error_what=$what extra=$extra")
                     true
                 }
 
@@ -1582,8 +1618,7 @@ class MusicPlayerService : Service() {
                         return@setOnCompletionListener
                     }
                     Log.d(TAG, "========== onCompletion called ==========")
-                    persistSession(isPlayingOverride = false)
-                    publishPlaybackEvent("completed")
+                    emitPlaybackSnapshot("transition")
                     playNextTrack()
                 }
 
@@ -1592,7 +1627,6 @@ class MusicPlayerService : Service() {
                 Log.e(TAG, "Exception in playTrack", e)
                 isPrepared = false
                 persistSession(isPlayingOverride = false)
-                publishPlaybackEvent("error")
             }
         }
     }
@@ -1605,7 +1639,7 @@ class MusicPlayerService : Service() {
                 persistSession(isPlayingOverride = true)
                 updatePlaybackState()
                 updateNotification()
-                publishPlaybackEvent("playing")
+                emitPlaybackSnapshot("transition")
             }
         } ?: Log.w(TAG, "MediaPlayer is null")
     }
@@ -1619,7 +1653,7 @@ class MusicPlayerService : Service() {
                 persistSession(isPlayingOverride = false)
                 updatePlaybackState()
                 updateNotification()
-                publishPlaybackEvent("paused")
+                emitPlaybackSnapshot("transition")
             }
         } ?: Log.w(TAG, "MediaPlayer is null")
     }
@@ -1721,8 +1755,8 @@ class MusicPlayerService : Service() {
         persistSession(isPlayingOverride = false)
         updatePlaybackState()
         updateNotification()
-        publishPlaybackEvent(if (clearQueue) "queue_changed" else "stopped")
         updateServiceLifetime()
+        emitPlaybackSnapshot("transition")
     }
 
     fun playNextTrack() {
@@ -1737,6 +1771,7 @@ class MusicPlayerService : Service() {
                 TAG,
                 "playNextTrack: loop mode replaying currentTrackIndex=$currentTrackIndex track=${tracks[currentTrackIndex].name}"
             )
+            pendingResumeAfterPrepare = true
             playQueueTrackAt(currentTrackIndex, 1, tracks.size)
             return
         }
@@ -1750,6 +1785,7 @@ class MusicPlayerService : Service() {
             TAG,
             "playNextTrack: previousIndex=$previousIndex newIndex=$currentTrackIndex playMode=$playMode nextTrack=${tracks[currentTrackIndex].name}"
         )
+        pendingResumeAfterPrepare = true
         playQueueTrackAt(currentTrackIndex, 1, tracks.size)
     }
 
@@ -1765,6 +1801,7 @@ class MusicPlayerService : Service() {
                 TAG,
                 "playPreviousTrack: loop mode replaying currentTrackIndex=$currentTrackIndex track=${tracks[currentTrackIndex].name}"
             )
+            pendingResumeAfterPrepare = true
             playQueueTrackAt(currentTrackIndex, -1, tracks.size)
             return
         }
@@ -1778,6 +1815,7 @@ class MusicPlayerService : Service() {
             TAG,
             "playPreviousTrack: previousIndex=$previousIndex newIndex=$currentTrackIndex playMode=$playMode previousTrack=${tracks[currentTrackIndex].name}"
         )
+        pendingResumeAfterPrepare = true
         playQueueTrackAt(currentTrackIndex, -1, tracks.size)
     }
 

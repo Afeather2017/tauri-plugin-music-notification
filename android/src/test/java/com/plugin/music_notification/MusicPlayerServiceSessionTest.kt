@@ -59,40 +59,4 @@ class MusicPlayerServiceSessionTest {
         assertEquals(0L, durable.runtime.positionMs)
         assertEquals(0L, durable.runtime.durationMs)
     }
-
-    @Test
-    fun resolveLocalRawCoverUrl_fallsBackToLocalhostForDatabaseTrack() {
-        assertEquals(
-            "http://localhost:2080/api/music/id/51/cover",
-            MusicPlayerService.resolveLocalRawCoverUrl(51L, null)
-        )
-        assertEquals(
-            "http://localhost:2080/api/music/id/51/cover",
-            MusicPlayerService.resolveLocalRawCoverUrl(51L, "")
-        )
-        assertEquals(
-            "http://localhost:2080/api/music/id/51/cover",
-            MusicPlayerService.resolveLocalRawCoverUrl(51L, "null")
-        )
-    }
-
-    @Test
-    fun resolveLocalRawCoverUrl_preservesExplicitAndRejectsTemporaryTrack() {
-        assertEquals(
-            "https://example.test/cover.jpg",
-            MusicPlayerService.resolveLocalRawCoverUrl(51L, " https://example.test/cover.jpg ")
-        )
-        assertNull(MusicPlayerService.resolveLocalRawCoverUrl(-1L, null))
-    }
-
-    @Test
-    fun normalizeOptionalString_rejectsSerializedJsonNull() {
-        assertNull(MusicPlayerService.normalizeOptionalString(null))
-        assertNull(MusicPlayerService.normalizeOptionalString(""))
-        assertNull(MusicPlayerService.normalizeOptionalString(" null "))
-        assertEquals(
-            "content://media/51",
-            MusicPlayerService.normalizeOptionalString(" content://media/51 ")
-        )
-    }
 }
