@@ -414,7 +414,8 @@ class MusicNotificationPlugin(private val activity: Activity): Plugin(activity) 
                 TAG,
                 "Command setPlayingQueue(): queueSize=${songs.size} currentIndex=${args.queue.currentIndex} " +
                     "serviceAvailable=${service != null} track=${selectedSong?.name} songId=${selectedSong?.id} " +
-                    "deviceId=${selectedSong?.deviceId} sourceKind=${selectedSong?.sourceKind}"
+                    "deviceId=${selectedSong?.deviceId} sourceKind=${selectedSong?.sourceKind} " +
+                    "coverUrl=${selectedSong?.coverUrl}"
             )
 
             if (service != null) {
