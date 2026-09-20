@@ -19,6 +19,8 @@ permissions = [
   "allow-set-server",
   "allow-set-playing-queue",
   "allow-get-playback-session",
+  "allow-subscribe-playback-events",
+  "allow-unsubscribe-playback-events",
   "allow-clear-playing-queue",
   "allow-set-play-mode",
   "allow-set-headset-media-button-disabled"

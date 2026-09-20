@@ -1,5 +1,5 @@
 use serde::de::DeserializeOwned;
-use tauri::{plugin::PluginApi, AppHandle, Runtime};
+use tauri::{ipc::Channel, plugin::PluginApi, AppHandle, Runtime};
 
 use crate::models::*;
 
@@ -98,7 +98,21 @@ impl<R: Runtime> MusicNotification<R> {
             },
             play_mode: PlayMode::Sequential,
             current_song_id: None,
+            service_generation: None,
+            sequence: None,
+            revision: None,
         })
+    }
+
+    pub fn subscribe_playback_events(
+        &self,
+        _handler: Channel<PlaybackEvent>,
+    ) -> crate::Result<EmptyResponse> {
+        Ok(EmptyResponse { success: false })
+    }
+
+    pub fn unsubscribe_playback_events(&self, _channel_id: u32) -> crate::Result<EmptyResponse> {
+        Ok(EmptyResponse { success: false })
     }
 
     pub fn clear_playing_queue(&self) -> crate::Result<QueueMutationResponse> {

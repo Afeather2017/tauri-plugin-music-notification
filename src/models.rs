@@ -172,6 +172,23 @@ pub struct PlaybackSession {
     pub runtime: PlaybackRuntime,
     pub play_mode: PlayMode,
     pub current_song_id: Option<i64>,
+    #[serde(default)]
+    pub service_generation: Option<String>,
+    #[serde(default)]
+    pub sequence: Option<u64>,
+    #[serde(default)]
+    pub revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackEvent {
+    pub protocol_version: u32,
+    pub service_generation: String,
+    pub sequence: u64,
+    pub revision: u64,
+    pub reason: String,
+    pub session: PlaybackSession,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

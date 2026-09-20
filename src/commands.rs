@@ -1,4 +1,4 @@
-use tauri::{command, AppHandle, Runtime};
+use tauri::{command, ipc::Channel, AppHandle, Runtime};
 
 use crate::models::*;
 use crate::MusicNotificationExt;
@@ -82,6 +82,23 @@ pub(crate) async fn set_playing_queue<R: Runtime>(
 #[command]
 pub(crate) async fn get_playback_session<R: Runtime>(app: AppHandle<R>) -> Result<PlaybackSession> {
     app.music_notification().get_playback_session()
+}
+
+#[command]
+pub(crate) async fn subscribe_playback_events<R: Runtime>(
+    app: AppHandle<R>,
+    handler: Channel<PlaybackEvent>,
+) -> Result<EmptyResponse> {
+    app.music_notification().subscribe_playback_events(handler)
+}
+
+#[command]
+pub(crate) async fn unsubscribe_playback_events<R: Runtime>(
+    app: AppHandle<R>,
+    channel_id: u32,
+) -> Result<EmptyResponse> {
+    app.music_notification()
+        .unsubscribe_playback_events(channel_id)
 }
 
 #[command]

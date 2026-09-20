@@ -52,6 +52,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_state,
             commands::set_playing_queue,
             commands::get_playback_session,
+            commands::subscribe_playback_events,
+            commands::unsubscribe_playback_events,
             commands::clear_playing_queue,
             commands::set_play_mode,
             commands::start_service,

@@ -11,6 +11,8 @@ const COMMANDS: &[&str] = &[
     "get_state",
     "set_playing_queue",
     "get_playback_session",
+    "subscribe_playback_events",
+    "unsubscribe_playback_events",
     "clear_playing_queue",
     "set_play_mode",
     "start_service",

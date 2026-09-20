@@ -1,5 +1,6 @@
 use serde::de::DeserializeOwned;
 use tauri::{
+    ipc::Channel,
     plugin::{PluginApi, PluginHandle},
     AppHandle, Runtime,
 };
@@ -120,6 +121,38 @@ impl<R: Runtime> MusicNotification<R> {
     pub fn get_playback_session(&self) -> crate::Result<PlaybackSession> {
         self.0
             .run_mobile_plugin("getPlaybackSession", EmptyRequest {})
+            .map_err(Into::into)
+    }
+
+    pub fn subscribe_playback_events(
+        &self,
+        handler: Channel<PlaybackEvent>,
+    ) -> crate::Result<EmptyResponse> {
+        #[derive(serde::Serialize)]
+        struct SubscribePlaybackEventsRequest {
+            handler: Channel<PlaybackEvent>,
+        }
+
+        self.0
+            .run_mobile_plugin(
+                "subscribePlaybackEvents",
+                SubscribePlaybackEventsRequest { handler },
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn unsubscribe_playback_events(&self, channel_id: u32) -> crate::Result<EmptyResponse> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct UnsubscribePlaybackEventsRequest {
+            channel_id: u32,
+        }
+
+        self.0
+            .run_mobile_plugin(
+                "unsubscribePlaybackEvents",
+                UnsubscribePlaybackEventsRequest { channel_id },
+            )
             .map_err(Into::into)
     }
 

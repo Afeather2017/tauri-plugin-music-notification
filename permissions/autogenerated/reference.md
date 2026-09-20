@@ -22,6 +22,8 @@ Default permissions for the plugin
 - `allow-set-server`
 - `allow-set-playing-queue`
 - `allow-get-playback-session`
+- `allow-subscribe-playback-events`
+- `allow-unsubscribe-playback-events`
 - `allow-clear-playing-queue`
 - `allow-set-play-mode`
 - `allow-set-headset-media-button-disabled`
@@ -577,6 +579,58 @@ Enables the stop_service command without any pre-configured scope.
 <td>
 
 Denies the stop_service command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`music-notification-api:allow-subscribe-playback-events`
+
+</td>
+<td>
+
+Enables the subscribe_playback_events command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`music-notification-api:deny-subscribe-playback-events`
+
+</td>
+<td>
+
+Denies the subscribe_playback_events command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`music-notification-api:allow-unsubscribe-playback-events`
+
+</td>
+<td>
+
+Enables the unsubscribe_playback_events command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`music-notification-api:deny-unsubscribe-playback-events`
+
+</td>
+<td>
+
+Denies the unsubscribe_playback_events command without any pre-configured scope.
 
 </td>
 </tr>

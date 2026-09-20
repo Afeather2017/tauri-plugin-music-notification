@@ -31,6 +31,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Collections
+import java.util.UUID
 
 class MusicPlayerService : Service() {
 
@@ -77,6 +78,13 @@ class MusicPlayerService : Service() {
         const val EXTRA_LUFS_PRECACHE_COUNT = "lufsPrecacheCount"
 
         var instance: MusicPlayerService? = null
+
+        @Volatile
+        private var playbackEventListener: ((PlaybackEvent) -> Unit)? = null
+
+        fun setPlaybackEventListener(listener: ((PlaybackEvent) -> Unit)?) {
+            playbackEventListener = listener
+        }
 
         fun loadServerLibrary(context: Context): String? {
             val libName = MusicNotificationPlugin.getServerLibName(context)
@@ -389,6 +397,15 @@ class MusicPlayerService : Service() {
         val currentSongId: Long?
     )
 
+    data class PlaybackEvent(
+        val protocolVersion: Int = 1,
+        val serviceGeneration: String,
+        val sequence: Long,
+        val revision: Long,
+        val reason: String,
+        val session: SessionSnapshot
+    )
+
     data class PrecacheLufsResult(
         val success: Boolean,
         val lufs: Double?,
@@ -403,6 +420,9 @@ class MusicPlayerService : Service() {
     private var tracks = mutableListOf<QueueSongInfo>()
     private var currentTrackIndex = -1
     private var playMode = "sequential"
+    private val serviceGeneration = UUID.randomUUID().toString()
+    private var eventSequence = 0L
+    private var sessionRevision = 0L
 
     private var mediaPlayer: MediaPlayer? = null
     private var isPrepared = false
@@ -413,6 +433,26 @@ class MusicPlayerService : Service() {
     fun hasMediaPlayer(): Boolean = mediaPlayer != null
 
     fun queueSize(): Int = tracks.size
+
+    fun getServiceGeneration(): String = serviceGeneration
+
+    fun getEventSequence(): Long = eventSequence
+
+    fun getSessionRevision(): Long = sessionRevision
+
+    private fun publishPlaybackEvent(reason: String) {
+        sessionRevision += 1
+        eventSequence += 1
+        playbackEventListener?.invoke(
+            PlaybackEvent(
+                serviceGeneration = serviceGeneration,
+                sequence = eventSequence,
+                revision = sessionRevision,
+                reason = reason,
+                session = buildSessionSnapshot()
+            )
+        )
+    }
 
     /** Start playing the current track from the restored queue */
     fun playCurrentTrack() {
@@ -842,11 +882,13 @@ class MusicPlayerService : Service() {
         )
         persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
         updateNotification()
+        publishPlaybackEvent("queue_changed")
     }
 
     fun setPlayMode(newPlayMode: String) {
         playMode = normalizePlayMode(newPlayMode)
         persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
+        publishPlaybackEvent("play_mode_changed")
     }
 
     fun clearPlayingQueue() {
@@ -1086,6 +1128,7 @@ class MusicPlayerService : Service() {
             if (queueIndex == currentTrackIndex) {
                 persistSession(isPlayingOverride = mediaPlayer?.isPlaying)
             }
+            publishPlaybackEvent("queue_changed")
         }
         return updatedTrack
     }
@@ -1453,6 +1496,7 @@ class MusicPlayerService : Service() {
         playbackGeneration += 1
         val generation = playbackGeneration
         persistSession(isPlayingOverride = false)
+        publishPlaybackEvent("track_changed")
 
         mediaPlayer = MediaPlayer().apply {
             try {
@@ -1500,8 +1544,18 @@ class MusicPlayerService : Service() {
                     applyTrackMetadata(track, artist, album, mp.duration.toLong(), null)
                     loadArtworkForTrackAsync(track, artist, album, mp.duration.toLong(), target.coverUrl, resolvedUrl)
                     persistSession(isPlayingOverride = false)
+                    publishPlaybackEvent("prepared")
                     resumeMusic()
                     precacheQueueTracks(track)
+                }
+
+                setOnSeekCompleteListener { mp ->
+                    if (mediaPlayer !== mp || playbackGeneration != generation || currentUrl != resolvedUrl) {
+                        return@setOnSeekCompleteListener
+                    }
+                    persistSession(isPlayingOverride = mp.isPlaying)
+                    updatePlaybackState()
+                    publishPlaybackEvent("seeked")
                 }
 
                 setOnErrorListener { _, what, extra ->
@@ -1515,6 +1569,7 @@ class MusicPlayerService : Service() {
                     Log.e(TAG, "MediaPlayer error - what: $what, extra: $extra")
                     isPrepared = false
                     persistSession(isPlayingOverride = false)
+                    publishPlaybackEvent("error")
                     true
                 }
 
@@ -1527,6 +1582,8 @@ class MusicPlayerService : Service() {
                         return@setOnCompletionListener
                     }
                     Log.d(TAG, "========== onCompletion called ==========")
+                    persistSession(isPlayingOverride = false)
+                    publishPlaybackEvent("completed")
                     playNextTrack()
                 }
 
@@ -1535,6 +1592,7 @@ class MusicPlayerService : Service() {
                 Log.e(TAG, "Exception in playTrack", e)
                 isPrepared = false
                 persistSession(isPlayingOverride = false)
+                publishPlaybackEvent("error")
             }
         }
     }
@@ -1547,6 +1605,7 @@ class MusicPlayerService : Service() {
                 persistSession(isPlayingOverride = true)
                 updatePlaybackState()
                 updateNotification()
+                publishPlaybackEvent("playing")
             }
         } ?: Log.w(TAG, "MediaPlayer is null")
     }
@@ -1560,6 +1619,7 @@ class MusicPlayerService : Service() {
                 persistSession(isPlayingOverride = false)
                 updatePlaybackState()
                 updateNotification()
+                publishPlaybackEvent("paused")
             }
         } ?: Log.w(TAG, "MediaPlayer is null")
     }
@@ -1661,6 +1721,7 @@ class MusicPlayerService : Service() {
         persistSession(isPlayingOverride = false)
         updatePlaybackState()
         updateNotification()
+        publishPlaybackEvent(if (clearQueue) "queue_changed" else "stopped")
         updateServiceLifetime()
     }
 

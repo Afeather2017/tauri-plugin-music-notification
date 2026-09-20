@@ -1,7 +1,7 @@
-import { invoke } from '@tauri-apps/api/core'
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export async function ping(value: string): Promise<string | null> {
-  return await invoke<{value?: string}>('plugin:music-notification|ping', {
+  return await invoke<{ value?: string }>("plugin:music-notification|ping", {
     payload: {
       value,
     },
@@ -22,13 +22,13 @@ export interface PlaybackState {
   duration: number;
 }
 
-export type PlayMode = 'sequential' | 'shuffle' | 'loop'
+export type PlayMode = "sequential" | "shuffle" | "loop";
 
 export interface QueueSong {
   id: number;
   name: string;
   deviceId?: string | null;
-  sourceKind: 'kaulan' | 'local_raw' | 'temporary';
+  sourceKind: "kaulan" | "local_raw" | "temporary";
   lufs: number | null;
   coverUrl?: string | null;
   localUri?: string | null;
@@ -51,113 +51,189 @@ export interface PlaybackSession {
   runtime: PlaybackRuntime;
   playMode: PlayMode;
   currentSongId: number | null;
+  serviceGeneration?: string | null;
+  sequence?: number | null;
+  revision?: number | null;
 }
 
-export async function play(options: PlayOptions): Promise<{ success: boolean; message?: string }> {
-  return await invoke<{ success: boolean; message?: string }>('plugin:music-notification|play', {
-    payload: options,
-  });
+export interface PlaybackEvent {
+  protocolVersion: 1;
+  serviceGeneration: string;
+  sequence: number;
+  revision: number;
+  reason:
+    | "snapshot"
+    | "prepared"
+    | "playing"
+    | "paused"
+    | "seeked"
+    | "track_changed"
+    | "queue_changed"
+    | "play_mode_changed"
+    | "stopped"
+    | "completed"
+    | "error";
+  session: PlaybackSession;
+}
+
+export async function play(
+  options: PlayOptions,
+): Promise<{ success: boolean; message?: string }> {
+  return await invoke<{ success: boolean; message?: string }>(
+    "plugin:music-notification|play",
+    {
+      payload: options,
+    },
+  );
 }
 
 export async function pause(): Promise<{ success: boolean }> {
-  return await invoke<{ success: boolean }>('plugin:music-notification|pause');
+  return await invoke<{ success: boolean }>("plugin:music-notification|pause");
 }
 
-export async function pauseAfter(delayMs: number): Promise<{ success: boolean }> {
-  return await invoke<{ success: boolean }>('plugin:music-notification|pause_after', {
-    payload: {
-      delayMs,
+export async function pauseAfter(
+  delayMs: number,
+): Promise<{ success: boolean }> {
+  return await invoke<{ success: boolean }>(
+    "plugin:music-notification|pause_after",
+    {
+      payload: {
+        delayMs,
+      },
     },
-  });
+  );
 }
 
 export async function resume(): Promise<{ success: boolean }> {
-  return await invoke<{ success: boolean }>('plugin:music-notification|resume');
+  return await invoke<{ success: boolean }>("plugin:music-notification|resume");
 }
 
 export async function stop(): Promise<{ success: boolean }> {
-  return await invoke<{ success: boolean }>('plugin:music-notification|stop');
+  return await invoke<{ success: boolean }>("plugin:music-notification|stop");
 }
 
 export async function next(): Promise<{ success: boolean }> {
-  return await invoke<{ success: boolean }>('plugin:music-notification|next');
+  return await invoke<{ success: boolean }>("plugin:music-notification|next");
 }
 
 export async function previous(): Promise<{ success: boolean }> {
-  return await invoke<{ success: boolean }>('plugin:music-notification|previous');
+  return await invoke<{ success: boolean }>(
+    "plugin:music-notification|previous",
+  );
 }
 
 export async function seek(position: number): Promise<{ success: boolean }> {
-  return await invoke<{ success: boolean }>('plugin:music-notification|seek', {
+  return await invoke<{ success: boolean }>("plugin:music-notification|seek", {
     position,
   });
 }
 
-export async function seekAndPlay(position: number): Promise<{ success: boolean }> {
-  return await invoke<{ success: boolean }>('plugin:music-notification|seek_and_play', {
-    position,
-  });
+export async function seekAndPlay(
+  position: number,
+): Promise<{ success: boolean }> {
+  return await invoke<{ success: boolean }>(
+    "plugin:music-notification|seek_and_play",
+    {
+      position,
+    },
+  );
 }
 
 export async function getState(): Promise<PlaybackState> {
-  return await invoke<PlaybackState>('plugin:music-notification|get_state');
+  return await invoke<PlaybackState>("plugin:music-notification|get_state");
 }
 
 export async function setPlayingQueue(
   queue: PlayingQueue,
-  playMode: PlayMode
+  playMode: PlayMode,
 ): Promise<{ success: boolean; message?: string }> {
   return await invoke<{ success: boolean; message?: string }>(
-    'plugin:music-notification|set_playing_queue',
+    "plugin:music-notification|set_playing_queue",
     {
       payload: {
         queue,
         playMode,
       },
-    }
+    },
   );
 }
 
 export async function getPlaybackSession(): Promise<PlaybackSession> {
-  return await invoke<PlaybackSession>('plugin:music-notification|get_playback_session');
-}
-
-export async function clearPlayingQueue(): Promise<{ success: boolean; message?: string }> {
-  return await invoke<{ success: boolean; message?: string }>(
-    'plugin:music-notification|clear_playing_queue'
+  return await invoke<PlaybackSession>(
+    "plugin:music-notification|get_playback_session",
   );
 }
 
-export async function setPlayMode(playMode: PlayMode): Promise<{ success: boolean; message?: string }> {
+export async function onPlaybackEvent(
+  listener: (event: PlaybackEvent) => void,
+): Promise<() => Promise<void>> {
+  const handler = new Channel<PlaybackEvent>(listener);
+  await invoke("plugin:music-notification|subscribe_playback_events", {
+    handler,
+  });
+  return async () => {
+    await invoke("plugin:music-notification|unsubscribe_playback_events", {
+      channelId: handler.id,
+    });
+  };
+}
+
+export async function clearPlayingQueue(): Promise<{
+  success: boolean;
+  message?: string;
+}> {
   return await invoke<{ success: boolean; message?: string }>(
-    'plugin:music-notification|set_play_mode',
+    "plugin:music-notification|clear_playing_queue",
+  );
+}
+
+export async function setPlayMode(
+  playMode: PlayMode,
+): Promise<{ success: boolean; message?: string }> {
+  return await invoke<{ success: boolean; message?: string }>(
+    "plugin:music-notification|set_play_mode",
     {
       payload: {
         playMode,
       },
-    }
+    },
   );
 }
 
-export async function startService(): Promise<{ success: boolean; message?: string }> {
-  return await invoke<{ success: boolean; message?: string }>('plugin:music-notification|start_service');
+export async function startService(): Promise<{
+  success: boolean;
+  message?: string;
+}> {
+  return await invoke<{ success: boolean; message?: string }>(
+    "plugin:music-notification|start_service",
+  );
 }
 
-export async function stopService(): Promise<{ success: boolean; message?: string }> {
-  return await invoke<{ success: boolean; message?: string }>('plugin:music-notification|stop_service');
+export async function stopService(): Promise<{
+  success: boolean;
+  message?: string;
+}> {
+  return await invoke<{ success: boolean; message?: string }>(
+    "plugin:music-notification|stop_service",
+  );
 }
 
 export interface SetVolumeOptions {
   volume: number;
 }
 
-export async function setVolume(options: SetVolumeOptions): Promise<{ success: boolean; message?: string }> {
-  return await invoke<{ success: boolean; message?: string }>('plugin:music-notification|set_volume', {
-    payload: options,
-  });
+export async function setVolume(
+  options: SetVolumeOptions,
+): Promise<{ success: boolean; message?: string }> {
+  return await invoke<{ success: boolean; message?: string }>(
+    "plugin:music-notification|set_volume",
+    {
+      payload: options,
+    },
+  );
 }
 
-export type NormalizationMode = 'auto' | 'manual' | 'fixed'
+export type NormalizationMode = "auto" | "manual" | "fixed";
 
 export interface SetNormalizationConfigOptions {
   mode: NormalizationMode;
@@ -167,30 +243,34 @@ export interface SetNormalizationConfigOptions {
 }
 
 export async function setNormalizationConfig(
-  options: SetNormalizationConfigOptions
+  options: SetNormalizationConfigOptions,
 ): Promise<{ success: boolean; message?: string }> {
   return await invoke<{ success: boolean; message?: string }>(
-    'plugin:music-notification|set_normalization_config',
+    "plugin:music-notification|set_normalization_config",
     {
       payload: options,
-    }
+    },
   );
 }
 
-export async function setServer(libraryName: string): Promise<{ success: boolean; message?: string }> {
+export async function setServer(
+  libraryName: string,
+): Promise<{ success: boolean; message?: string }> {
   return await invoke<{ success: boolean; message?: string }>(
-    'plugin:music-notification|set_server',
+    "plugin:music-notification|set_server",
     {
       libraryName,
-    }
+    },
   );
 }
 
-export async function setHeadsetMediaButtonDisabled(disabled: boolean): Promise<{ success: boolean; message?: string }> {
+export async function setHeadsetMediaButtonDisabled(
+  disabled: boolean,
+): Promise<{ success: boolean; message?: string }> {
   return await invoke<{ success: boolean; message?: string }>(
-    'plugin:music-notification|set_headset_media_button_disabled',
+    "plugin:music-notification|set_headset_media_button_disabled",
     {
       payload: { disabled },
-    }
+    },
   );
 }
