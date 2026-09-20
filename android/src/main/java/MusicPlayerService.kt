@@ -217,6 +217,24 @@ class MusicPlayerService : Service() {
             return maxOf(0L, deadlineMs - nowMs)
         }
 
+        fun normalizeOptionalString(value: String?): String? {
+            return value
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+        }
+
+        fun resolveLocalRawCoverUrl(songId: Long, coverUrl: String?): String? {
+            val explicitCoverUrl = normalizeOptionalString(coverUrl)
+            if (explicitCoverUrl != null) {
+                return explicitCoverUrl
+            }
+            return if (songId > 0L) {
+                "http://localhost:2080/api/music/id/$songId/cover"
+            } else {
+                null
+            }
+        }
+
         private fun parseSessionJson(json: JSONObject): SessionSnapshot {
             val queueJson = json.optJSONObject("queue") ?: JSONObject()
             val songsJson = queueJson.optJSONArray("songs") ?: JSONArray()
@@ -226,12 +244,12 @@ class MusicPlayerService : Service() {
                 val song = QueueSongInfo(
                     id = songJson.optLong("id", -1L),
                     name = songJson.optString("name", ""),
-                    deviceId = songJson.optString("deviceId", "").ifBlank { null },
+                    deviceId = if (songJson.isNull("deviceId")) null else normalizeOptionalString(songJson.optString("deviceId", "")),
                     sourceKind = songJson.optString("sourceKind", ""),
-                    localUri = songJson.optString("localUri", "").ifBlank { null },
-                    tempSongUrl = songJson.optString("tempSongUrl", "").ifBlank { null },
+                    localUri = if (songJson.isNull("localUri")) null else normalizeOptionalString(songJson.optString("localUri", "")),
+                    tempSongUrl = if (songJson.isNull("tempSongUrl")) null else normalizeOptionalString(songJson.optString("tempSongUrl", "")),
                     lufs = if (songJson.has("lufs") && !songJson.isNull("lufs")) songJson.optDouble("lufs") else null,
-                    coverUrl = songJson.optString("coverUrl", "").ifBlank { null }
+                    coverUrl = if (songJson.isNull("coverUrl")) null else normalizeOptionalString(songJson.optString("coverUrl", ""))
                 )
                 if (song.hasValidLocator()) {
                     songs.add(song)
@@ -456,7 +474,10 @@ class MusicPlayerService : Service() {
                 )
             }
             "local_raw" -> track.localUri?.takeIf { it.isNotBlank() }?.let {
-                PlaybackTarget(audioUrl = it, coverUrl = track.coverUrl)
+                PlaybackTarget(
+                    audioUrl = it,
+                    coverUrl = resolveLocalRawCoverUrl(track.id, track.coverUrl)
+                )
             }
             "temporary" -> track.tempSongUrl?.takeIf { it.isNotBlank() }?.let {
                 PlaybackTarget(audioUrl = it, coverUrl = track.coverUrl)
@@ -906,7 +927,7 @@ class MusicPlayerService : Service() {
     }
 
     private fun buildRuntimeSnapshot(): PlaybackRuntimeSnapshot {
-        mediaPlayer?.let { player ->
+        mediaPlayer?.takeIf { isPrepared }?.let { player ->
             return PlaybackRuntimeSnapshot(
                 isPlaying = player.isPlaying,
                 positionMs = player.currentPosition.toLong(),
@@ -923,7 +944,7 @@ class MusicPlayerService : Service() {
     }
 
     private fun persistSession(isPlayingOverride: Boolean? = null) {
-        val runtime = mediaPlayer?.let { player ->
+        val runtime = mediaPlayer?.takeIf { isPrepared }?.let { player ->
             PlaybackRuntimeSnapshot(
                 isPlaying = isPlayingOverride ?: player.isPlaying,
                 positionMs = player.currentPosition.toLong(),
@@ -1281,11 +1302,13 @@ class MusicPlayerService : Service() {
     ) {
         val coverUrl = coverUrlOverride?.trim()
         if (coverUrl.isNullOrEmpty()) {
+            Log.i(TAG, "No artwork target for track=${track.name} songId=${track.id} sourceKind=${track.sourceKind}")
             currentArtworkBitmap = null
             applyTrackMetadata(track, artist, album, durationMs, null)
             return
         }
 
+        Log.i(TAG, "Loading artwork for track=${track.name} coverUrl=$coverUrl")
         val generation = artworkGeneration
         Thread {
             val artwork = try {
