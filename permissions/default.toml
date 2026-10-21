@@ -11,6 +11,7 @@ permissions = [
   "allow-previous",
   "allow-seek",
   "allow-seek-and-play",
+  "allow-play-track-at-index",
   "allow-get-state",
   "allow-start-service",
   "allow-stop-service",
@@ -19,8 +20,6 @@ permissions = [
   "allow-set-server",
   "allow-set-playing-queue",
   "allow-get-playback-session",
-  "allow-subscribe-playback-events",
-  "allow-unsubscribe-playback-events",
   "allow-clear-playing-queue",
   "allow-set-play-mode",
   "allow-set-headset-media-button-disabled"

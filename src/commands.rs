@@ -1,4 +1,4 @@
-use tauri::{command, ipc::Channel, AppHandle, Runtime};
+use tauri::{command, AppHandle, Runtime};
 
 use crate::models::*;
 use crate::MusicNotificationExt;
@@ -54,8 +54,21 @@ pub(crate) async fn previous<R: Runtime>(app: AppHandle<R>) -> Result<EmptyRespo
 }
 
 #[command]
-pub(crate) async fn seek<R: Runtime>(app: AppHandle<R>, position: i64) -> Result<EmptyResponse> {
-    app.music_notification().seek(position)
+pub(crate) async fn seek<R: Runtime>(
+    app: AppHandle<R>,
+    position: i64,
+    auto_play: Option<bool>,
+) -> Result<EmptyResponse> {
+    app.music_notification()
+        .seek(position, auto_play.unwrap_or(false))
+}
+
+#[command]
+pub(crate) async fn play_track_at_index<R: Runtime>(
+    app: AppHandle<R>,
+    payload: PlayTrackAtIndexRequest,
+) -> Result<EmptyResponse> {
+    app.music_notification().play_track_at_index(payload)
 }
 
 #[command]
@@ -82,23 +95,6 @@ pub(crate) async fn set_playing_queue<R: Runtime>(
 #[command]
 pub(crate) async fn get_playback_session<R: Runtime>(app: AppHandle<R>) -> Result<PlaybackSession> {
     app.music_notification().get_playback_session()
-}
-
-#[command]
-pub(crate) async fn subscribe_playback_events<R: Runtime>(
-    app: AppHandle<R>,
-    handler: Channel<PlaybackEvent>,
-) -> Result<EmptyResponse> {
-    app.music_notification().subscribe_playback_events(handler)
-}
-
-#[command]
-pub(crate) async fn unsubscribe_playback_events<R: Runtime>(
-    app: AppHandle<R>,
-    channel_id: u32,
-) -> Result<EmptyResponse> {
-    app.music_notification()
-        .unsubscribe_playback_events(channel_id)
 }
 
 #[command]
